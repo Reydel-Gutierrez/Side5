@@ -1,0 +1,16 @@
+:root {
+  --bg: #070b0d;
+  --surface: #101719;
+  --surface-2: #172123;
+  --cream: #f2e7d2;
+  --orange: #e86f45;
+  --green: #3f5f55;
+  --soft-green: #6f8f7e;
+  --text: #f7f0e6;
+  --muted: #a8a29a;
+  --border: rgba(242, 231, 210, 0.12);
+
+  --muted-green: var(--green);
+  --text-primary: var(--text);
+  --text-muted: var(--muted);
+}
