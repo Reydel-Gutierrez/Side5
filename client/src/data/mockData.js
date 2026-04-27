@@ -1,26 +1,76 @@
-export const players = [
-  { name: 'Reydel', marketValue: 18.5, rating: 8.9 },
-  { name: 'Alexis', marketValue: 14.2, rating: 8.2 },
-  { name: 'Migue', marketValue: 9.8, rating: 7.6 },
-  { name: 'Jorge', marketValue: 8.1, rating: 7.8 },
-  { name: 'Andres', marketValue: 7.3, rating: 7.4 },
-  { name: 'Nico', marketValue: 6.8, rating: 7.2 },
+/** All mock passwords are `1234` (see Login / README). */
+
+export const users = [
+  {
+    id: 'u1',
+    username: 'reydel',
+    password: '1234',
+    displayName: 'Reydel',
+    initials: 'RY',
+    position: 'Forward',
+    baseValue: 10,
+    rating: 7,
+    playerId: 'p1',
+    email: 'reydel@side5.app',
+    phone: '+1 (555) 014-2203',
+    memberSince: 'March 2025',
+  },
 ]
 
-export const nextGame = {
-  badge: 'MN',
-  title: 'Monday Night',
-  dateTime: 'May 27 • 8:00 PM',
-  attendance: '12 / 14 Players',
-  status: 'Draft pending',
+function playerFromUser(user, extra) {
+  return {
+    id: user.playerId,
+    userId: user.id,
+    name: user.displayName,
+    initials: user.initials,
+    position: user.position,
+    value: user.baseValue,
+    rating: user.rating,
+    goals: extra.goals,
+    assists: extra.assists,
+    saves: extra.saves,
+    mvps: extra.mvps,
+    games: extra.games,
+    winRate: extra.winRate,
+    status: extra.status,
+  }
 }
 
-export const recentResult = {
-  dateTime: 'May 20 • 8:00 PM',
-  home: 'Team A',
-  away: 'Team B',
-  homeScore: 3,
-  awayScore: 2,
-  mvp: 'Reydel',
-  mvpRating: 8.7,
+export const players = users.map((user, index) =>
+  playerFromUser(user, {
+    goals: 0,
+    assists: 0,
+    saves: 0,
+    mvps: 0,
+    games: 0,
+    winRate: 0,
+    status: index === 0 ? 'confirmed' : 'invited',
+  }),
+)
+
+export const leagues = []
+
+export const initialLeagueMembers = []
+
+export const sessions = []
+
+export const teams = [
+  { id: 'ta', name: 'Team A', captainId: null, playerIds: [], budgetUsed: 0 },
+  { id: 'tb', name: 'Team B', captainId: null, playerIds: [], budgetUsed: 0 },
+  { id: 'tc', name: 'Team C', captainId: null, playerIds: [], budgetUsed: 0 },
+]
+
+export const matches = []
+
+export const submittedStats = []
+
+export const teamTabs = [
+  { id: 'ta', label: 'Team A' },
+  { id: 'tb', label: 'Team B' },
+  { id: 'tc', label: 'Team C' },
+]
+
+export function findUserByUsername(username) {
+  const u = String(username || '').trim().toLowerCase()
+  return users.find((x) => x.username.toLowerCase() === u) ?? null
 }
