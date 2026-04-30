@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import PrimaryButton from '../components/PrimaryButton'
@@ -6,59 +6,135 @@ import SessionCard from '../components/SessionCard'
 import SessionFormModal from '../components/SessionFormModal'
 import Tabs from '../components/Tabs'
 import { useMockApp } from '../context/MockAppContext'
+import { apiFetch } from '../utils/apiFetch'
 
 const sessionTabs = [
   { id: 'upcoming', label: 'Upcoming' },
   { id: 'past', label: 'Past' },
 ]
 
+function isObviousTestLeagueName(name) {
+  const n = String(name || '').trim().toLowerCase()
+  if (!n) return false
+  if (n === 'monday test' || n === 'monday test league') return true
+  if (/\btest\s+league\b/i.test(String(name || ''))) return true
+  return false
+}
+
+/** One league per player: prefer active league if in list, else first real (non-test) row, else first row. */
+function pickSingleLeagueRow(rows, preferLeagueId) {
+  const list = Array.isArray(rows) ? rows : []
+  const nonTest = list.filter((r) => !isObviousTestLeagueName(r.name))
+  const pool = nonTest.length ? nonTest : list
+  if (!pool.length) return null
+  if (preferLeagueId != null && String(preferLeagueId).trim() !== '') {
+    const hit = pool.find((r) => String(r.id) === String(preferLeagueId))
+    if (hit) return hit
+  }
+  return pool[0]
+}
+
 function Sessions() {
+  const { createSession, canManageLeague, refreshLeaguesFromApi, activeLeague } = useMockApp()
   const [activeTab, setActiveTab] = useState('upcoming')
   const [formOpen, setFormOpen] = useState(false)
-  const [leagueFilter, setLeagueFilter] = useState('all')
+  const [sessions, setSessions] = useState([])
+  const [leagues, setLeagues] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
-  const {
-    sessions,
-    players,
-    createSession,
-    leaguesDisplay,
-    activeLeagueId,
-    currentUser,
-    canManageLeague,
-    getLeagueMemberPlayerIds,
-  } = useMockApp()
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const sessionsResult = await apiFetch('/api/sessions')
+      const allSessionRows = Array.isArray(sessionsResult?.data) ? sessionsResult.data : []
+
+      let myLeagues = []
+      let primaryLeagueId = null
+      try {
+        const rawUser = window.localStorage.getItem('currentUser')
+        const u = rawUser ? JSON.parse(rawUser) : null
+        const uid = Number.parseInt(String(u?.id ?? ''), 10)
+        if (!Number.isNaN(uid) && String(uid) === String(u?.id ?? '')) {
+          const mine = await apiFetch(`/api/leagues/mine?userId=${uid}`)
+          const rows = Array.isArray(mine?.data) ? mine.data : []
+          const picked = pickSingleLeagueRow(rows, activeLeague?.id)
+          if (picked) {
+            primaryLeagueId = picked.id
+            myLeagues = [
+              {
+                id: picked.id,
+                name: picked.name ?? '',
+                myRole: String(picked.my_role ?? picked.myRole ?? '').toLowerCase(),
+              },
+            ]
+          }
+        }
+      } catch {
+        myLeagues = []
+      }
+
+      const sessionRows =
+        primaryLeagueId != null
+          ? allSessionRows.filter((s) => String(s.league_id) === String(primaryLeagueId))
+          : allSessionRows
+
+      const formattedSessions = sessionRows.map((session) => ({
+        ...session,
+        leagueId: session.league_id,
+        leagueName: session.league_name,
+        date: session.session_date,
+        time: session.session_time,
+      }))
+      setSessions(formattedSessions)
+      setLeagues(myLeagues)
+    } catch {
+      setSessions([])
+      setLeagues([])
+    } finally {
+      setIsLoading(false)
+    }
+  }, [activeLeague?.id])
 
   useEffect(() => {
     if (searchParams.get('new') === '1') {
       setFormOpen(true)
       setSearchParams({}, { replace: true })
     }
-  }, [searchParams, setSearchParams])
+    ;(async () => {
+      await refreshLeaguesFromApi?.()
+      await loadData()
+    })()
+  }, [searchParams, setSearchParams, loadData, refreshLeaguesFromApi])
 
-  const canShowCreate = Boolean(currentUser && leaguesDisplay.some((l) => canManageLeague(l.id)))
+  const canShowCreate = useMemo(
+    () =>
+      leagues.some(
+        (lg) =>
+          lg.myRole === 'owner' ||
+          lg.myRole === 'manager' ||
+          canManageLeague(String(lg.id)),
+      ),
+    [leagues, canManageLeague],
+  )
 
-  const defaultLeagueId = useMemo(() => {
-    if (activeLeagueId && canManageLeague(activeLeagueId)) return activeLeagueId
-    return leaguesDisplay.find((l) => canManageLeague(l.id))?.id ?? leaguesDisplay[0]?.id
-  }, [activeLeagueId, canManageLeague, leaguesDisplay])
+  const defaultLeagueId = useMemo(() => leagues[0]?.id ?? null, [leagues])
 
-  const filteredSessions = useMemo(() => {
-    if (leagueFilter === 'all') return sessions
-    return sessions.filter((s) => s.leagueId === leagueFilter)
-  }, [sessions, leagueFilter])
+  const upcoming = sessions.filter((session) => session.status !== 'completed')
+  const past = sessions.filter((session) => session.status === 'completed')
 
-  const upcoming = filteredSessions.filter((session) => session.status !== 'completed')
-  const past = filteredSessions.filter((session) => session.status === 'completed')
-
-  const handleCreate = (payload) => {
-    const result = createSession(payload)
+  const handleCreate = async (payload) => {
+    const result = await createSession(payload)
     if (!result.ok) {
-      window.alert(result.reason)
+      window.alert(result.reason || 'Could not create session.')
       return
     }
     setFormOpen(false)
-    navigate(`/sessions/${result.id}`)
+    await loadData()
+    if (result.id) {
+      navigate(`/sessions/${result.id}`, { replace: false })
+    }
   }
 
   return (
@@ -70,11 +146,7 @@ function Sessions() {
             type="button"
             className="header-cta"
             disabled={!canShowCreate}
-            title={
-              !currentUser
-                ? 'Log in to create sessions'
-                : 'You need owner or manager access in at least one league'
-            }
+            title={canShowCreate ? '' : 'You need owner or manager access in at least one league'}
             onClick={() => setFormOpen(true)}
           >
             Create
@@ -82,29 +154,19 @@ function Sessions() {
         }
       />
 
-      <label className="field league-filter-field">
-        <span className="field-label">League</span>
-        <select
-          className="field-input"
-          value={leagueFilter}
-          onChange={(e) => setLeagueFilter(e.target.value)}
-        >
-          <option value="all">All leagues</option>
-          {leaguesDisplay.map((lg) => (
-            <option key={lg.id} value={lg.id}>
-              {lg.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {leagues[0]?.name ? (
+        <p className="meta session-league-line sessions-screen-league">League: {leagues[0].name}</p>
+      ) : !isLoading ? (
+        <p className="meta sessions-screen-league">Join a league from Home to see sessions here.</p>
+      ) : null}
 
       <SessionFormModal
         open={formOpen}
         mode="create"
         session={null}
-        maxRoster={players.length}
-        getLeagueMemberPlayerCount={(leagueId) => getLeagueMemberPlayerIds(leagueId).length}
-        leagues={leaguesDisplay}
+        maxRoster={0}
+        getLeagueMemberPlayerCount={() => 0}
+        leagues={leagues}
         defaultLeagueId={defaultLeagueId}
         onClose={() => setFormOpen(false)}
         onSubmit={handleCreate}
@@ -114,20 +176,22 @@ function Sessions() {
 
       {activeTab === 'upcoming' ? (
         <div className="screen-stack">
+          {isLoading ? <p className="meta">Loading...</p> : null}
+          {!isLoading && upcoming.length === 0 ? <p className="meta">No upcoming sessions found.</p> : null}
           {upcoming.map((session) => (
-            <SessionCard key={session.id} session={session} showLeague />
+            <SessionCard key={session.id} session={session} showLeague={false} />
           ))}
         </div>
       ) : (
         <section className="card">
           <ul className="list-plain">
+            {!isLoading && past.length === 0 ? <li className="list-row">No past sessions found.</li> : null}
             {past.map((session) => (
               <li key={session.id} className="list-row">
                 <div>
                   <p className="session-title">{session.title}</p>
-                  <p className="meta league-inline">League: {session.leagueName}</p>
                   <p className="meta">
-                    {session.date} · {session.time}
+                    {session.date} ? {session.time}
                   </p>
                 </div>
                 <span className="meta">Completed</span>

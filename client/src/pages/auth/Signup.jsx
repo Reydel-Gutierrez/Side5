@@ -2,29 +2,22 @@ import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import AuthLayout from '../../layouts/AuthLayout'
 import { useMockApp } from '../../context/MockAppContext'
-
-const positions = ['GK', 'DF', 'MF', 'FW']
-const positionMap = {
-  GK: 'Goalkeeper',
-  DF: 'Defender',
-  MF: 'Midfielder',
-  FW: 'Forward',
-}
+import { apiFetch } from '../../utils/apiFetch'
 
 function Signup() {
   const navigate = useNavigate()
-  const { signup, currentUserId } = useMockApp()
+  const { setAuthenticatedUser, currentUserId } = useMockApp()
   const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [position, setPosition] = useState('MF')
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   if (currentUserId) return <Navigate to="/" replace />
 
-  const onSubmit = (event) => {
+  const onSubmit = async (event) => {
     event.preventDefault()
     setError('')
     if (password !== confirmPassword) {
@@ -35,17 +28,23 @@ function Signup() {
       setError('You must accept the terms to continue.')
       return
     }
-    const result = signup({
-      fullName,
-      username,
-      password,
-      position: positionMap[position] ?? 'Midfielder',
-    })
-    if (!result.ok) {
-      setError(result.reason)
-      return
+    setIsSubmitting(true)
+    try {
+      const result = await apiFetch('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          displayName: fullName.trim(),
+          username: username.trim(),
+          password,
+        }),
+      })
+      setAuthenticatedUser(result.user)
+      navigate('/', { replace: true })
+    } catch (requestError) {
+      setError(requestError.message || 'Could not create account.')
+    } finally {
+      setIsSubmitting(false)
     }
-    navigate('/', { replace: true })
   }
 
   return (
@@ -70,14 +69,6 @@ function Signup() {
         <input className="auth-input auth-input--plain" type="password" placeholder="Password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
         <input className="auth-input auth-input--plain" type="password" placeholder="Confirm Password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
 
-        <select className="auth-input auth-input--plain auth-select" value={position} onChange={(event) => setPosition(event.target.value)}>
-          {positions.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-
         <label className="auth-check auth-check--terms">
           <input type="checkbox" checked={acceptedTerms} onChange={() => setAcceptedTerms((value) => !value)} />
           <span>
@@ -88,8 +79,8 @@ function Signup() {
 
         {error ? <p className="auth-error">{error}</p> : null}
 
-        <button className="auth-button" type="submit">
-          Create Account
+        <button className="auth-button" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? 'Creating…' : 'Create Account'}
         </button>
       </form>
 

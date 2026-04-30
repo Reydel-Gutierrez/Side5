@@ -21,8 +21,8 @@ const navItems = [
     ),
   },
   {
-    to: '/leagues',
-    label: 'Leagues',
+    to: '/league',
+    label: 'League',
     icon: (
       <Icon>
         <path d="M4 7h6v10H4zM14 7h6v4h-6zM14 13h6v4h-6z" fill="none" stroke="currentColor" strokeWidth="1.8" />

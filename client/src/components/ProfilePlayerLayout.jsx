@@ -18,7 +18,7 @@ function StatMini({ label, value }) {
   )
 }
 
-function ProfilePlayerLayout({ player, backTo, identityExtra, afterRadar, accountDetails }) {
+function ProfilePlayerLayout({ player, backTo, identityExtra, afterRadar, accountDetails, radarData = [], profileCardData = null }) {
   const [activeTab, setActiveTab] = useState('overview')
   const [copyHint, setCopyHint] = useState('')
   const isSelf = Boolean(accountDetails && player.id === accountDetails.playerId)
@@ -55,17 +55,73 @@ function ProfilePlayerLayout({ player, backTo, identityExtra, afterRadar, accoun
         <header className="player-profile-top player-profile-top--spacer" aria-hidden="true" />
       )}
 
-      <section className="card player-profile-identity">
-        <div className="player-profile-identity-row">
-          <div className="avatar avatar-xl player-profile-avatar">{player.initials}</div>
-          <div className="player-profile-identity-text">
-            <h1 className="player-profile-name">{player.name}</h1>
-            <p className="player-profile-value">${player.value.toFixed(1)}M</p>
-            <p className="meta player-profile-position">{player.position}</p>
-            {identityExtra}
+      {profileCardData ? (
+        <section className="hero card hero-card-main profile-hero-card">
+          <div className="hero-card-main__top">
+            <div className="hero-card-main__identity">
+              <div className="hero-card-main__avatar-wrap">
+                <button
+                  type="button"
+                  className="hero-card-main__avatar-button"
+                  onClick={profileCardData.onAvatarClick}
+                  aria-label="Change profile picture"
+                >
+                  <div className="avatar avatar-xl hero-card-main__avatar">
+                    {profileCardData.avatarImage ? (
+                      <img src={profileCardData.avatarImage} alt="" className="hero-card-main__avatar-image" />
+                    ) : (
+                      profileCardData.avatarFallback || player.initials
+                    )}
+                  </div>
+                </button>
+                <span className="hero-card-main__overall-badge">{profileCardData.overall}</span>
+              </div>
+              <div className="hero-card-main__identity-text">
+                <p className="greeting-label">{profileCardData.greeting}</p>
+                <h1 className="hero-name">{profileCardData.displayName || player.name}</h1>
+                {profileCardData.avatarHint ? <p className="meta toast-hint">{profileCardData.avatarHint}</p> : null}
+              </div>
+            </div>
+
+            <aside className="hero-card-main__worth">
+              <p className="hero-card-main__worth-label">TOTAL WORTH</p>
+              <p className="hero-card-main__worth-value">${profileCardData.totalWorth}M</p>
+              <p className="hero-card-main__ovr">OVR {profileCardData.overall}</p>
+              <svg className="hero-card-main__sparkline" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M2 28 L24 26 L42 16 L62 18 L80 9 L98 3" />
+              </svg>
+            </aside>
           </div>
-        </div>
-      </section>
+
+          <div className="hero-card-main__stats">
+            <article className="hero-card-main__stat">
+              <p className="hero-card-main__stat-label">Main Archetype</p>
+              <p className="hero-card-main__stat-value">{profileCardData.archetype}</p>
+            </article>
+            <article className="hero-card-main__stat">
+              <p className="hero-card-main__stat-label">MVP Trophies</p>
+              <p className="hero-card-main__stat-value">{profileCardData.mvpTrophies}</p>
+            </article>
+            <article className="hero-card-main__stat">
+              <p className="hero-card-main__stat-label">Matches Played</p>
+              <p className="hero-card-main__stat-value">{profileCardData.matchesPlayed}</p>
+            </article>
+          </div>
+        </section>
+      ) : (
+        <section className="card player-profile-identity">
+          <div className="player-profile-identity-row">
+            <div className="avatar avatar-xl player-profile-avatar">{player.initials}</div>
+            <div className="player-profile-identity-text">
+              <h1 className="player-profile-name">{player.name}</h1>
+              <p className="player-profile-value">${player.value.toFixed(1)}M</p>
+              {identityExtra}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {profileCardData ? <div className="profile-logout-row">{identityExtra}</div> : null}
 
       <Tabs tabs={profileTabs} activeTab={activeTab} onChange={setActiveTab} />
 
@@ -79,7 +135,7 @@ function ProfilePlayerLayout({ player, backTo, identityExtra, afterRadar, accoun
             <StatMini label="Win Rate" value={`${player.winRate}%`} />
             <StatMini label="Rating" value={player.rating.toFixed(1)} />
           </div>
-          <PlayerRadarChart player={player} />
+          <PlayerRadarChart data={radarData} />
           {afterRadar}
         </>
       ) : null}
@@ -143,6 +199,13 @@ function ProfilePlayerLayout({ player, backTo, identityExtra, afterRadar, accoun
                   {copyHint ? <p className="meta toast-hint">{copyHint}</p> : null}
                 </div>
                 <div className="profile-detail-row">
+                  <span className="profile-detail-label">Display Name</span>
+                  <div className="profile-detail-value-wrap">
+                    <span className="profile-detail-value">{accountDetails.displayName}</span>
+                    <span className="profile-detail-hint">Shown across the app</span>
+                  </div>
+                </div>
+                <div className="profile-detail-row">
                   <span className="profile-detail-label">Username</span>
                   <div className="profile-detail-value-wrap">
                     <span className="profile-detail-value is-mono">{accountDetails.username}</span>
@@ -164,7 +227,7 @@ function ProfilePlayerLayout({ player, backTo, identityExtra, afterRadar, accoun
                 </div>
               </div>
               <p className="meta profile-footnote profile-footnote--account">
-                Database and authentication are not wired up yet; this screen previews the experience.
+                Account stats and profile card values are loaded from the backend profile data.
               </p>
             </>
           ) : (

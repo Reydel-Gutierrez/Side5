@@ -50,7 +50,7 @@ function CreateLeagueModal({ open, onClose, onCreate }) {
             ×
           </button>
         </div>
-        <p className="meta">Leagues group sessions and stats. Everything stays local for now.</p>
+        <p className="meta">Leagues group sessions and stats for your group.</p>
 
         <div className="form-stack">
           <label className="field">

@@ -5,9 +5,7 @@ function PlayerRow({ player, rightContent, onClick }) {
         <div className="avatar">{player.initials}</div>
         <div>
           <p className="player-name">{player.name}</p>
-          <p className="meta">
-            {player.position} • ${player.value.toFixed(1)}M
-          </p>
+          <p className="meta">${player.value.toFixed(1)}M</p>
         </div>
       </div>
       {rightContent ? <div>{rightContent}</div> : null}

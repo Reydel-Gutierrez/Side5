@@ -12,20 +12,54 @@ const defaultForm = {
   budgetPerTeam: 50,
   maxPlayers: 8,
   status: 'draft_pending',
+  teamCount: 2,
+  teamNames: ['Side A', 'Side B'],
 }
 
-function sessionToForm(session) {
+function sessionToForm(session, existingTeams = null) {
   if (!session) return { ...defaultForm }
+  let dateIso = session.dateIso ?? ''
+  if (!dateIso && session.session_date != null) {
+    const sd = session.session_date
+    if (sd instanceof Date && !Number.isNaN(sd.getTime())) {
+      dateIso = sd.toISOString().slice(0, 10)
+    } else if (typeof sd === 'string' && /^\d{4}-\d{2}-\d{2}/.test(sd)) {
+      dateIso = sd.slice(0, 10)
+    } else {
+      dateIso = String(sd).slice(0, 10)
+    }
+  }
+  let time24 = session.time24 ?? '20:00'
+  if (session.session_time != null) {
+    const tr = String(session.session_time)
+    const short = tr.length >= 5 ? tr.slice(0, 5) : tr
+    if (/^\d{2}:\d{2}$/.test(short)) time24 = short
+  }
+  const rosterLen = Array.isArray(session.players) ? session.players.length : 0
+  let teamCount = 2
+  let teamNames = ['Side A', 'Side B']
+  if (Array.isArray(existingTeams) && existingTeams.length) {
+    teamCount = Math.min(8, Math.max(2, existingTeams.length))
+    teamNames = existingTeams.slice(0, teamCount).map((t, idx) => {
+      const n = String(t?.name ?? '')
+        .trim()
+        .slice(0, 50)
+      return n || `Team ${idx + 1}`
+    })
+    while (teamNames.length < teamCount) teamNames.push(`Team ${teamNames.length + 1}`)
+  }
   return {
-    leagueId: session.leagueId ?? '',
+    leagueId: String(session.leagueId ?? session.league_id ?? ''),
     title: session.title ?? '',
-    dateIso: session.dateIso ?? '',
-    time24: session.time24 ?? '20:00',
+    dateIso,
+    time24,
     location: session.location ?? '',
     format: session.format ?? '5v5',
-    budgetPerTeam: session.budgetPerTeam ?? 50,
-    maxPlayers: session.maxPlayers ?? session.players?.length ?? session.playerIds?.length ?? 8,
+    budgetPerTeam: Number(session.budgetPerTeam ?? session.budget_per_team) || 50,
+    maxPlayers: session.maxPlayers ?? session.playerIds?.length ?? (rosterLen > 0 ? rosterLen : 8),
     status: session.status ?? 'draft_pending',
+    teamCount,
+    teamNames,
   }
 }
 
@@ -37,6 +71,7 @@ function SessionFormModal({
   getLeagueMemberPlayerCount,
   leagues,
   defaultLeagueId,
+  existingTeams,
   onClose,
   onSubmit,
 }) {
@@ -46,7 +81,7 @@ function SessionFormModal({
   useEffect(() => {
     if (open) {
       if (mode === 'edit' && session) {
-        setForm(sessionToForm(session))
+        setForm(sessionToForm(session, existingTeams))
       } else {
         setForm({
           ...defaultForm,
@@ -55,13 +90,18 @@ function SessionFormModal({
       }
       setError('')
     }
-  }, [open, mode, session, defaultLeagueId, leagues])
+  }, [open, mode, session, defaultLeagueId, leagues, existingTeams])
 
   const title = useMemo(() => (mode === 'edit' ? 'Edit session' : 'Create session'), [mode])
 
+  const resolvedLeagueId =
+    mode === 'create'
+      ? String(defaultLeagueId || leagues?.[0]?.id || form.leagueId || '')
+      : String(form.leagueId || defaultLeagueId || '')
+
   if (!open) return null
 
-  const countRawOpen = getLeagueMemberPlayerCount?.(form.leagueId)
+  const countRawOpen = getLeagueMemberPlayerCount?.(resolvedLeagueId || form.leagueId)
   const rosterCap = Math.max(1, countRawOpen !== undefined && countRawOpen !== null ? countRawOpen : maxRoster)
   const rosterMaxInput = Math.max(4, rosterCap)
 
@@ -82,12 +122,12 @@ function SessionFormModal({
       setError('Please pick a time.')
       return
     }
-    const countRaw = getLeagueMemberPlayerCount?.(form.leagueId)
+    const countRaw = getLeagueMemberPlayerCount?.(resolvedLeagueId || form.leagueId)
     const rosterCap = Math.max(1, countRaw !== undefined && countRaw !== null ? countRaw : maxRoster)
     const maxPlayers = Math.min(Math.max(4, Number(form.maxPlayers) || 4), Math.max(4, rosterCap))
     const budget = Math.min(Math.max(10, Number(form.budgetPerTeam) || 50), 200)
-    onSubmit({
-      leagueId: form.leagueId || defaultLeagueId || leagues?.[0]?.id,
+    const payload = {
+      leagueId: resolvedLeagueId || form.leagueId || defaultLeagueId || leagues?.[0]?.id,
       title: form.title.trim(),
       dateIso: form.dateIso,
       time24: form.time24,
@@ -96,7 +136,18 @@ function SessionFormModal({
       budgetPerTeam: budget,
       maxPlayers,
       status: form.status,
-    })
+    }
+    if (mode === 'create' || mode === 'edit') {
+      const n = Math.min(8, Math.max(2, Number(form.teamCount) || 2))
+      const names = Array.isArray(form.teamNames) ? [...form.teamNames] : []
+      while (names.length < n) names.push(`Team ${names.length + 1}`)
+      payload.teams = Array.from({ length: n }, (_, i) => ({
+        name: String(names[i] || `Team ${i + 1}`)
+          .trim()
+          .slice(0, 50) || `Team ${i + 1}`,
+      }))
+    }
+    onSubmit(payload)
   }
 
   return (
@@ -116,26 +167,13 @@ function SessionFormModal({
             ×
           </button>
         </div>
-        <p className="meta">Set the basics now; you can edit this session anytime.</p>
+        <p className="meta">
+          {mode === 'create'
+            ? 'Set schedule, budget, expected roster size, and team names. Teams are created when you save.'
+            : 'Update session details, roster size, and teams (names and how many). Captains are set from the session page.'}
+        </p>
 
         <div className="form-stack">
-          {mode === 'create' && leagues?.length ? (
-            <label className="field">
-              <span className="field-label">League</span>
-              <select
-                className="field-input"
-                value={form.leagueId}
-                onChange={(e) => handleChange('leagueId', e.target.value)}
-              >
-                {leagues.map((lg) => (
-                  <option key={lg.id} value={lg.id}>
-                    {lg.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
           <label className="field">
             <span className="field-label">Session name</span>
             <input
@@ -198,7 +236,60 @@ function SessionFormModal({
               value={form.budgetPerTeam}
               onChange={(e) => handleChange('budgetPerTeam', e.target.value)}
             />
+            <span className="field-hint">Draft budget cap for each team during this session.</span>
           </label>
+
+          {mode === 'create' || mode === 'edit' ? (
+            <>
+              <label className="field">
+                <span className="field-label">Number of teams</span>
+                <select
+                  className="field-input"
+                  value={form.teamCount}
+                  onChange={(e) => {
+                    const n = Math.min(8, Math.max(2, Number(e.target.value) || 2))
+                    setForm((prev) => {
+                      const names = [...(Array.isArray(prev.teamNames) ? prev.teamNames : [])]
+                      while (names.length < n) names.push(`Team ${names.length + 1}`)
+                      return { ...prev, teamCount: n, teamNames: names.slice(0, n) }
+                    })
+                  }}
+                >
+                  {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+                    <option key={n} value={n}>
+                      {n} teams
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {mode === 'edit' ? (
+                <p className="field-hint">
+                  Reducing the number of teams removes the extra teams from the end (matches tied to removed teams are
+                  cleared). Increasing adds empty teams.
+                </p>
+              ) : null}
+              {Array.from({ length: form.teamCount }, (_, i) => (
+                <label key={i} className="field">
+                  <span className="field-label">Team {i + 1} name</span>
+                  <input
+                    className="field-input"
+                    value={form.teamNames[i] ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setForm((prev) => {
+                        const names = [...(Array.isArray(prev.teamNames) ? prev.teamNames : [])]
+                        while (names.length < prev.teamCount) names.push(`Team ${names.length + 1}`)
+                        names[i] = v
+                        return { ...prev, teamNames: names }
+                      })
+                    }}
+                    maxLength={50}
+                    autoComplete="off"
+                  />
+                </label>
+              ))}
+            </>
+          ) : null}
 
           <label className="field">
             <span className="field-label">Expected players (roster size)</span>

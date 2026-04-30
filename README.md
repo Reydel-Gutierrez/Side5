@@ -42,10 +42,51 @@ Server runs at `http://localhost:5000`.
 
 ## API Endpoints (Current)
 
-- `GET /api/health` -> `{ "status": "ok", "app": "Side5 API" }`
-- `GET /api/leagues` -> placeholder response
-- `GET /api/sessions` -> placeholder response
-- `GET /api/players` -> placeholder response
+- `GET /api/health`
+- `POST /api/auth/login`
+- `GET /api/leagues`
+- `GET /api/leagues/:id`
+- `POST /api/leagues`
+- `POST /api/leagues/join`
+- `GET /api/leagues/:id/members`
+- `PATCH /api/leagues/:leagueId/members/:userId/role`
+- `GET /api/sessions`
+- `GET /api/sessions/:id`
+- `POST /api/sessions`
+- `POST /api/sessions/:id/confirm`
+- `GET /api/players`
+- `GET /api/players/:id`
+- `POST /api/matches/:matchId/stats`
+- `GET /api/matches/:matchId/stats/pending`
+- `PATCH /api/stats/:submissionId/approve`
+- `PATCH /api/stats/:submissionId/deny`
+
+## MySQL Setup
+
+Create database:
+
+```sql
+CREATE DATABASE side5_db;
+```
+
+Run schema:
+
+```bash
+mysql -u root -p side5_db < server/src/db/schema.sql
+```
+
+Run seed:
+
+```bash
+mysql -u root -p side5_db < server/src/db/seed.sql
+```
+
+Run server:
+
+```bash
+cd server
+npm run dev
+```
 
 ## Notes
 

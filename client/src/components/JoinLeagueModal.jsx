@@ -15,12 +15,12 @@ function JoinLeagueModal({ open, onClose, onJoin }) {
 
   if (!open) return null
 
-  const save = () => {
+  const save = async () => {
     if (!code.trim()) {
       setError('Enter an invite code.')
       return
     }
-    const result = onJoin(code.trim())
+    const result = await onJoin(code.trim())
     if (!result.ok) {
       setError(result.reason)
       return

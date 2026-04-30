@@ -19,6 +19,7 @@ function SessionCard({ session, showLeague }) {
       <p className="meta">
         {session.date} · {session.time}
       </p>
+      {session.league_id ? <p className="meta">League ID: {session.league_id}</p> : null}
       <p className="meta">
         {roster.length} / {session.maxPlayers ?? 10} Players
       </p>

@@ -2,29 +2,35 @@ import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import AuthLayout from '../../layouts/AuthLayout'
 import { useMockApp } from '../../context/MockAppContext'
+import { apiFetch } from '../../utils/apiFetch'
 
 function LoginMain() {
   const navigate = useNavigate()
-  const { login, currentUserId } = useMockApp()
+  const { currentUserId, setAuthenticatedUser } = useMockApp()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [rememberMe, setRememberMe] = useState(true)
   const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   if (currentUserId) return <Navigate to="/" replace />
 
-  const onSubmit = (event) => {
+  const onSubmit = async (event) => {
     event.preventDefault()
     setError('')
-    const result = login(username, password)
-    if (!result.ok) {
-      setError(result.reason)
-      return
+    setIsSubmitting(true)
+    try {
+      const result = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      })
+      setAuthenticatedUser(result.user)
+      navigate('/', { replace: true })
+    } catch (requestError) {
+      setError(requestError.message || 'Login failed.')
+    } finally {
+      setIsSubmitting(false)
     }
-    if (!rememberMe) {
-      window.localStorage.removeItem('side5-current-user-id')
-    }
-    navigate('/', { replace: true })
   }
 
   return (
@@ -85,8 +91,8 @@ function LoginMain() {
 
         {error ? <p className="auth-error">{error}</p> : null}
 
-        <button className="auth-button" type="submit">
-          Log In
+        <button className="auth-button" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? 'Loading...' : 'Log In'}
         </button>
       </form>
 

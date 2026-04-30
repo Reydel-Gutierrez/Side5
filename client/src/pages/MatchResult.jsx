@@ -70,13 +70,13 @@ function MatchResult() {
         ))}
       </section>
 
-      <Link to={`/matches/${match.id}/submit-stats`}>
-        <PrimaryButton className="w-full">Submit Your Stats</PrimaryButton>
+      <Link to={`/matches/${match.id}/post-match`}>
+        <PrimaryButton className="w-full">Post-Match Report</PrimaryButton>
       </Link>
       {canApprove ? (
-        <Link to={`/matches/${match.id}/approve-stats`}>
+        <Link to={`/matches/${match.id}/captain-review`}>
           <button type="button" className="btn btn-secondary w-full">
-            Approve Submitted Stats
+            Captain Review
           </button>
         </Link>
       ) : null}

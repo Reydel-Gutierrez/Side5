@@ -1,33 +1,8 @@
-import {
-  PolarAngleAxis,
-  PolarGrid,
-  PolarRadiusAxis,
-  Radar,
-  RadarChart,
-  ResponsiveContainer,
-} from 'recharts'
-
-/** Map raw stats to 0–100 for a balanced pentagon (mock “last 20 games”). */
-export function playerToRadarData(player) {
-  if (!player) return []
-  const scoring = Math.min(100, Math.round((player.goals / 15) * 87.5))
-  const playmaking = Math.min(100, Math.round((player.assists / 18) * 100))
-  const winning = Math.min(100, Math.round(player.winRate))
-  const form = Math.min(100, Math.round((player.rating / 10) * 100))
-  const clutch = Math.min(100, Math.round(player.mvps * 15))
-  return [
-    { subject: 'Scoring', value: scoring },
-    { subject: 'Playmaking', value: playmaking },
-    { subject: 'Winning', value: winning },
-    { subject: 'Form', value: form },
-    { subject: 'Clutch', value: clutch },
-  ]
-}
+import { PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, ResponsiveContainer } from 'recharts'
 
 const tickStyle = { fill: '#f2e7d2', fontSize: 11, fontWeight: 600 }
 
-function PlayerRadarChart({ player }) {
-  const data = playerToRadarData(player)
+function PlayerRadarChart({ data = [] }) {
 
   return (
     <section className="card player-radar-card">

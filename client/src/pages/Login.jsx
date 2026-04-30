@@ -1,37 +1,47 @@
-import { useEffect, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
-import PrimaryButton from "../components/PrimaryButton";
-import { useMockApp } from "../context/MockAppContext";
+import { useEffect, useState } from 'react'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
+import PrimaryButton from '../components/PrimaryButton'
+import SecondaryButton from '../components/SecondaryButton'
+import { useMockApp } from '../context/MockAppContext'
+import { apiFetch } from '../utils/apiFetch'
 
 function Login() {
-  const { login, currentUserId } = useMockApp();
-  const navigate = useNavigate();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [showForm, setShowForm] = useState(false);
+  const navigate = useNavigate()
+  const { currentUserId, setAuthenticatedUser } = useMockApp()
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   if (currentUserId) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/" replace />
   }
 
   useEffect(() => {
-    document.body.classList.add("login-page");
+    document.body.classList.add('login-page')
     return () => {
-      document.body.classList.remove("login-page");
-    };
-  }, []);
-
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    setError("");
-    const result = login(username, password);
-    if (!result.ok) {
-      setError(result.reason);
-      return;
+      document.body.classList.remove('login-page')
     }
-    navigate("/", { replace: true });
-  };
+  }, [])
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setIsSubmitting(true)
+    try {
+      const result = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      })
+      setAuthenticatedUser(result.user)
+      navigate('/', { replace: true })
+    } catch (requestError) {
+      setError(requestError.message || 'Login failed.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   return (
     <div
@@ -103,8 +113,8 @@ function Login() {
               >
                 Back
               </SecondaryButton>
-              <PrimaryButton type="submit" className="w-full">
-                Enter
+              <PrimaryButton type="submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? 'Loading...' : 'Enter'}
               </PrimaryButton>
             </div>
           </form>
@@ -113,7 +123,7 @@ function Login() {
         <p className="login-footnote">Play fair. Compete. Improve.</p>
       </div>
     </div>
-  );
+  )
 }
 
-export default Login;
+export default Login

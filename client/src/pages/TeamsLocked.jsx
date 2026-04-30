@@ -4,8 +4,13 @@ import PageHeader from '../components/PageHeader'
 import PrimaryButton from '../components/PrimaryButton'
 import RoleChip from '../components/RoleChip'
 import Tabs from '../components/Tabs'
-import { teamTabs } from '../data/mockData'
 import { useMockApp } from '../context/MockAppContext'
+
+const teamTabs = [
+  { id: 'ta', label: 'Team A' },
+  { id: 'tb', label: 'Team B' },
+  { id: 'tc', label: 'Team C' },
+]
 
 function TeamsLocked() {
   const { sessionId } = useParams()
