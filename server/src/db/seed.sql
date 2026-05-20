@@ -26,11 +26,33 @@ VALUES (
   (SELECT id FROM users WHERE username = 'reydel')
 );
 
-INSERT INTO league_members (league_id, user_id, role)
+INSERT INTO league_members (
+  league_id,
+  user_id,
+  role,
+  is_active,
+  matches_played,
+  rating,
+  goals,
+  wins,
+  losses,
+  mvp_count,
+  ovr,
+  player_worth
+)
 VALUES (
   (SELECT id FROM leagues WHERE invite_code = 'SIDE5-MON'),
   (SELECT id FROM users WHERE username = 'reydel'),
-  'owner'
+  'owner',
+  TRUE,
+  0,
+  6.0,
+  0,
+  0,
+  0,
+  0,
+  60,
+  10.00
 );
 
 INSERT INTO sessions (

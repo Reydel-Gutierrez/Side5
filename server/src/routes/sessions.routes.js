@@ -1,5 +1,12 @@
 const express = require('express')
 const { query, pool } = require('../db/pool')
+const {
+  LM_RATING_SQL,
+  LM_WORTH_SQL,
+  LM_OVR_SQL,
+  leagueMemberJoinForSession,
+  leagueMemberJoinForTeamSession,
+} = require('../queries/leagueMemberStats')
 
 const router = express.Router()
 
@@ -13,15 +20,27 @@ function isMissingAvatarColumn(error) {
 
 async function querySessionPlayersWithOptionalAvatar(sessionId) {
   const sqlWith = `SELECT sp.user_id, sp.status, sp.confirmed_at,
-              u.username, u.display_name, u.base_value, u.rating, u.avatar_image
+              u.username, u.display_name,
+              ${LM_WORTH_SQL} AS base_value,
+              ${LM_WORTH_SQL} AS player_worth,
+              ${LM_RATING_SQL} AS rating,
+              ${LM_OVR_SQL} AS ovr,
+              u.avatar_image
        FROM session_players sp
        INNER JOIN users u ON sp.user_id = u.id
+       ${leagueMemberJoinForSession()}
        WHERE sp.session_id = ?
        ORDER BY sp.confirmed_at DESC`
   const sqlWithout = `SELECT sp.user_id, sp.status, sp.confirmed_at,
-              u.username, u.display_name, u.base_value, u.rating, '' AS avatar_image
+              u.username, u.display_name,
+              ${LM_WORTH_SQL} AS base_value,
+              ${LM_WORTH_SQL} AS player_worth,
+              ${LM_RATING_SQL} AS rating,
+              ${LM_OVR_SQL} AS ovr,
+              '' AS avatar_image
        FROM session_players sp
        INNER JOIN users u ON sp.user_id = u.id
+       ${leagueMemberJoinForSession()}
        WHERE sp.session_id = ?
        ORDER BY sp.confirmed_at DESC`
   try {
@@ -37,7 +56,7 @@ async function assertActorCanManageSessionTeams(actorId, sessionId) {
   const rows = await query(
     `SELECT lm.role AS league_role
      FROM sessions s
-     INNER JOIN league_members lm ON lm.league_id = s.league_id AND lm.user_id = ?
+     INNER JOIN league_members lm ON lm.league_id = s.league_id AND lm.user_id = ? AND lm.is_active = TRUE
      WHERE s.id = ?
      LIMIT 1`,
     [actorId, sessionId],
@@ -102,6 +121,18 @@ async function deleteSessionCascade(conn, sessionId) {
     await conn.execute(`DELETE FROM matches WHERE id IN (${ph})`, matchIds)
   }
   await conn.execute('DELETE FROM stat_submissions WHERE session_id = ?', [sessionId])
+  try {
+    await conn.execute(
+      `DELETE psr FROM player_stat_reviews psr
+       INNER JOIN player_stat_submissions pss ON pss.id = psr.submission_id
+       WHERE pss.session_id = ?`,
+      [sessionId],
+    )
+    await conn.execute('DELETE FROM player_stat_submissions WHERE session_id = ?', [sessionId])
+    await conn.execute('DELETE FROM player_stat_review_slots WHERE session_id = ?', [sessionId])
+  } catch (error) {
+    if (error?.code !== 'ER_NO_SUCH_TABLE') throw error
+  }
   const [teamRows] = await conn.execute('SELECT id FROM teams WHERE session_id = ?', [sessionId])
   const teamIds = (Array.isArray(teamRows) ? teamRows : []).map((r) => r.id).filter((id) => id != null)
   if (teamIds.length) {
@@ -120,9 +151,10 @@ async function deleteSessionCascade(conn, sessionId) {
 
 async function recalculateTeamBudgetUsedConn(conn, teamId) {
   const [rows] = await conn.execute(
-    `SELECT COALESCE(SUM(COALESCE(u.base_value, 0)), 0) AS total
+    `SELECT COALESCE(SUM(${LM_WORTH_SQL}), 0) AS total
      FROM team_players tp
      INNER JOIN users u ON u.id = tp.user_id
+     ${leagueMemberJoinForTeamSession()}
      WHERE tp.team_id = ?`,
     [teamId],
   )
@@ -152,7 +184,7 @@ async function syncCaptainMembershipConn(conn, sessionId, teamId, nextCaptainId)
 
 async function assertActorCanManageLeague(actorId, leagueId) {
   const rows = await query(
-    `SELECT role FROM league_members WHERE league_id = ? AND user_id = ? LIMIT 1`,
+    `SELECT role FROM league_members WHERE league_id = ? AND user_id = ? AND is_active = TRUE LIMIT 1`,
     [leagueId, actorId],
   )
   if (!rows.length) {
@@ -266,9 +298,10 @@ async function maybeRunBenchShuffleAllTeamsLockedConn(conn, sessionId) {
   }
 
   const [pending] = await conn.execute(
-    `SELECT sp.user_id, COALESCE(u.base_value, 0) AS base_value
+    `SELECT sp.user_id, ${LM_WORTH_SQL} AS base_value
      FROM session_players sp
      INNER JOIN users u ON u.id = sp.user_id
+     ${leagueMemberJoinForSession()}
      WHERE sp.session_id = ? AND sp.status = 'confirmed'
        AND NOT EXISTS (
          SELECT 1 FROM team_players tp
@@ -428,7 +461,7 @@ router.post('/:id/teams', async (req, res) => {
         `SELECT 1 AS ok
          FROM league_members lm
          INNER JOIN sessions s ON s.league_id = lm.league_id
-         WHERE s.id = ? AND lm.user_id = ?
+         WHERE s.id = ? AND lm.user_id = ? AND lm.is_active = TRUE
          LIMIT 1`,
         [sessionId, captainId],
       )
@@ -502,7 +535,7 @@ router.patch('/:id/teams/:teamId/captain', async (req, res) => {
         `SELECT 1 AS ok
          FROM league_members lm
          INNER JOIN sessions s ON s.league_id = lm.league_id
-         WHERE s.id = ? AND lm.user_id = ?
+         WHERE s.id = ? AND lm.user_id = ? AND lm.is_active = TRUE
          LIMIT 1`,
         [sessionId, captainId],
       )
@@ -568,9 +601,15 @@ router.get('/:id/draft', async (req, res) => {
     )
 
     const roster = await query(
-      `SELECT sp.user_id, sp.status, u.username, u.display_name, u.base_value, u.rating, u.avatar_image
+      `SELECT sp.user_id, sp.status, u.username, u.display_name,
+              ${LM_WORTH_SQL} AS base_value,
+              ${LM_WORTH_SQL} AS player_worth,
+              ${LM_RATING_SQL} AS rating,
+              ${LM_OVR_SQL} AS ovr,
+              u.avatar_image
        FROM session_players sp
        INNER JOIN users u ON u.id = sp.user_id
+       ${leagueMemberJoinForSession()}
        WHERE sp.session_id = ? AND sp.status = 'confirmed'
        ORDER BY u.display_name ASC, u.username ASC`,
       [sessionId],
@@ -676,7 +715,15 @@ router.post('/:id/teams/:teamId/players', async (req, res) => {
     let budgetUsed = 0
     try {
       await conn.beginTransaction()
-      const [userRows] = await conn.execute('SELECT COALESCE(base_value, 0) AS base_value FROM users WHERE id = ? LIMIT 1', [userId])
+      const [userRows] = await conn.execute(
+        `SELECT ${LM_WORTH_SQL} AS base_value
+         FROM users u
+         INNER JOIN sessions s ON s.id = ?
+         LEFT JOIN league_members lm ON lm.league_id = s.league_id AND lm.user_id = u.id AND lm.is_active = TRUE
+         WHERE u.id = ?
+         LIMIT 1`,
+        [sessionId, userId],
+      )
       const playerCost = Array.isArray(userRows) && userRows[0] ? Number(userRows[0].base_value) || 0 : 0
       const [budgetRows] = await conn.execute('SELECT COALESCE(budget_used, 0) AS budget_used FROM teams WHERE id = ? LIMIT 1 FOR UPDATE', [
         teamId,
@@ -943,7 +990,7 @@ router.patch('/:id/teams/:teamId', async (req, res) => {
           `SELECT 1 AS ok
            FROM league_members lm
            INNER JOIN sessions s ON s.league_id = lm.league_id
-           WHERE s.id = ? AND lm.user_id = ?
+           WHERE s.id = ? AND lm.user_id = ? AND lm.is_active = TRUE
            LIMIT 1`,
           [sessionId, captainId],
         )
@@ -1363,5 +1410,7 @@ router.post('/:id/confirm', async (req, res) => {
     return handleSqlError(res, error)
   }
 })
+
+router.use(require('./gameHub.routes'))
 
 module.exports = router

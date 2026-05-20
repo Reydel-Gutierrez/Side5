@@ -267,8 +267,8 @@ function SessionDetails() {
             const displayName = player.display_name || player.username || 'Player'
             const initials = initialsFromDisplayName(displayName)
             const rating = Number(player.rating) || 0
-            const overall = rating > 0 ? Math.round(rating * 10) : '\u2014'
-            const worth = Number(player.base_value) || 0
+            const overall = Number(player.ovr) || (rating > 0 ? Math.round(rating * 10) : '\u2014')
+            const worth = Number(player.player_worth ?? player.base_value) || 0
             const dot = '\u00b7'
             const metricsTail = ` ${dot} OVR ${overall} ${dot} $${worth.toFixed(1)}M`
             const avatarSrc = player.avatar_image ? String(player.avatar_image).trim() : ''

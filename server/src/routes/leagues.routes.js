@@ -1,7 +1,21 @@
 const express = require('express')
 const { query, pool } = require('../db/pool')
+const { fetchLeagueLeaderboard } = require('../queries/leaderboard')
 
 const router = express.Router()
+
+const INSERT_LEAGUE_MEMBER_SQL = `
+  INSERT INTO league_members (league_id, user_id, role)
+  VALUES (?, ?, ?)
+  ON DUPLICATE KEY UPDATE is_active = TRUE
+`
+
+async function deactivateLeagueMember(conn, leagueId, userId) {
+  await conn.execute(
+    `UPDATE league_members SET is_active = FALSE WHERE league_id = ? AND user_id = ?`,
+    [leagueId, userId],
+  )
+}
 
 function handleSqlError(res, error) {
   return res.status(500).json({ error: 'Database error', details: error.message })
@@ -67,17 +81,93 @@ router.get('/mine', async (req, res) => {
               lm.role AS my_role,
               lm.joined_at,
               u.display_name AS owner_name,
-              (SELECT COUNT(*) FROM league_members lm2 WHERE lm2.league_id = l.id) AS member_count,
+              (SELECT COUNT(*) FROM league_members lm2 WHERE lm2.league_id = l.id AND lm2.is_active = TRUE) AS member_count,
               (SELECT COUNT(*) FROM sessions s WHERE s.league_id = l.id) AS session_count
        FROM league_members lm
        INNER JOIN leagues l ON l.id = lm.league_id
        INNER JOIN users u ON l.owner_user_id = u.id
-       WHERE lm.user_id = ?
+       WHERE lm.user_id = ? AND lm.is_active = TRUE
        ORDER BY lm.joined_at ASC`,
       [userId]
     )
 
     return res.json({ data: rows, count: rows.length })
+  } catch (error) {
+    return handleSqlError(res, error)
+  }
+})
+
+router.get('/:id/leaderboard', async (req, res) => {
+  const leagueId = Number.parseInt(req.params.id, 10)
+  if (Number.isNaN(leagueId)) {
+    return res.status(400).json({ error: 'Invalid league id' })
+  }
+
+  try {
+    const leagues = await query('SELECT id, name FROM leagues WHERE id = ? LIMIT 1', [leagueId])
+    if (!leagues.length) {
+      return res.status(404).json({ error: 'League not found' })
+    }
+
+    const includeInactive =
+      String(req.query.includeInactive ?? '').toLowerCase() === 'true' ||
+      String(req.query.includeInactive ?? '') === '1'
+    const players = await fetchLeagueLeaderboard(leagueId, { includeInactive })
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+    return res.json({
+      data: {
+        league_id: leagueId,
+        league_name: leagues[0].name,
+        players,
+        count: players.length,
+      },
+    })
+  } catch (error) {
+    return handleSqlError(res, error)
+  }
+})
+
+router.get('/:id/members', async (req, res) => {
+  const leagueId = Number.parseInt(req.params.id, 10)
+  if (Number.isNaN(leagueId)) {
+    return res.status(400).json({ error: 'Invalid league id' })
+  }
+
+  try {
+    const leagues = await query('SELECT id, name FROM leagues WHERE id = ? LIMIT 1', [leagueId])
+    if (!leagues.length) {
+      return res.status(404).json({ error: 'League not found' })
+    }
+
+    const members = await query(
+      `SELECT lm.league_id, lm.user_id, lm.role, lm.joined_at, lm.is_active,
+              u.username, u.display_name, '' AS avatar_image,
+              lm.rating,
+              lm.player_worth,
+              lm.player_worth AS base_value,
+              lm.ovr,
+              COALESCE(pp.main_archetype, 'None') AS main_archetype,
+              lm.mvp_count AS mvp_trophies,
+              lm.goals,
+              lm.matches_played,
+              lm.wins,
+              lm.losses,
+              EXISTS (
+                SELECT 1
+                FROM teams t
+                INNER JOIN sessions s ON s.id = t.session_id
+                WHERE s.league_id = lm.league_id
+                  AND t.captain_user_id = lm.user_id
+              ) AS is_team_captain
+       FROM league_members lm
+       INNER JOIN users u ON lm.user_id = u.id
+       LEFT JOIN player_profiles pp ON pp.user_id = lm.user_id
+       WHERE lm.league_id = ? AND lm.is_active = TRUE
+       ORDER BY lm.joined_at ASC`,
+      [leagueId]
+    )
+
+    return res.json({ data: members, count: members.length, league_name: leagues[0].name })
   } catch (error) {
     return handleSqlError(res, error)
   }
@@ -131,11 +221,7 @@ router.post('/', async (req, res) => {
       [name, description || null, normalizedInvite, ownerUserId]
     )
 
-    await query(
-      `INSERT INTO league_members (league_id, user_id, role)
-       VALUES (?, ?, 'owner')`,
-      [result.insertId, ownerUserId]
-    )
+    await query(INSERT_LEAGUE_MEMBER_SQL, [result.insertId, ownerUserId, 'owner'])
 
     return res.status(201).json({
       message: 'League created',
@@ -179,17 +265,10 @@ router.post('/join', async (req, res) => {
     }
 
     const leagueId = leagues[0].id
-    await query(
-      `INSERT INTO league_members (league_id, user_id, role)
-       VALUES (?, ?, 'player')`,
-      [leagueId, userId]
-    )
+    await query(INSERT_LEAGUE_MEMBER_SQL, [leagueId, userId, 'player'])
 
     return res.status(201).json({ message: 'Joined league', data: { leagueId, userId } })
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ error: 'User is already in this league' })
-    }
     return handleSqlError(res, error)
   }
 })
@@ -210,27 +289,27 @@ router.post('/leave', async (req, res) => {
       `SELECT lm.user_id, lm.role, l.owner_user_id
        FROM league_members lm
        INNER JOIN leagues l ON l.id = lm.league_id
-       WHERE lm.league_id = ? AND lm.user_id = ?
+       WHERE lm.league_id = ? AND lm.user_id = ? AND lm.is_active = TRUE
        LIMIT 1`,
       [leagueId, userId],
     )
     const member = Array.isArray(memberRows) ? memberRows[0] : null
     if (!member) {
       await conn.rollback()
-      return res.status(404).json({ error: 'You are not a member of this league.' })
+      return res.status(404).json({ error: 'You are not an active member of this league.' })
     }
 
     const primaryOwnerId = Number(member.owner_user_id)
     const isPrimaryOwner = Number(userId) === primaryOwnerId
 
     const [countRows] = await conn.execute(
-      `SELECT COUNT(*) AS c FROM league_members WHERE league_id = ? AND user_id <> ?`,
+      `SELECT COUNT(*) AS c FROM league_members WHERE league_id = ? AND user_id <> ? AND is_active = TRUE`,
       [leagueId, userId],
     )
     const otherCount = Number((Array.isArray(countRows) ? countRows[0] : countRows)?.c) || 0
 
     if (!isPrimaryOwner) {
-      await conn.execute('DELETE FROM league_members WHERE league_id = ? AND user_id = ?', [leagueId, userId])
+      await deactivateLeagueMember(conn, leagueId, userId)
       await conn.commit()
       return res.json({ message: 'Left league', data: { leagueId, userId } })
     }
@@ -243,7 +322,7 @@ router.post('/leave', async (req, res) => {
 
     const [nextRows] = await conn.execute(
       `SELECT user_id FROM league_members
-       WHERE league_id = ? AND user_id <> ?
+       WHERE league_id = ? AND user_id <> ? AND is_active = TRUE
        ORDER BY joined_at ASC, user_id ASC
        LIMIT 1`,
       [leagueId, userId],
@@ -259,7 +338,7 @@ router.post('/leave', async (req, res) => {
       nextOwnerId,
     ])
     await conn.execute('UPDATE leagues SET owner_user_id = ? WHERE id = ?', [nextOwnerId, leagueId])
-    await conn.execute('DELETE FROM league_members WHERE league_id = ? AND user_id = ?', [leagueId, userId])
+    await deactivateLeagueMember(conn, leagueId, userId)
 
     await conn.commit()
     return res.json({ message: 'Left league', data: { leagueId, userId, newOwnerUserId: nextOwnerId } })
@@ -268,58 +347,6 @@ router.post('/leave', async (req, res) => {
     return handleSqlError(res, error)
   } finally {
     conn.release()
-  }
-})
-
-router.get('/:id/members', async (req, res) => {
-  const leagueId = Number.parseInt(req.params.id, 10)
-  if (Number.isNaN(leagueId)) {
-    return res.status(400).json({ error: 'Invalid league id' })
-  }
-
-  try {
-    const members = await query(
-      `SELECT lm.league_id, lm.user_id, lm.role, lm.joined_at,
-              u.username, u.display_name, '' AS avatar_image,
-              CASE
-                WHEN COALESCE(stats.approved_games, 0) = 0 THEN 10.00
-                ELSE COALESCE(pp.total_worth, u.base_value)
-              END AS base_value,
-              CASE
-                WHEN COALESCE(stats.approved_games, 0) = 0 THEN 6.0
-                ELSE u.rating
-              END AS rating,
-              CASE
-                WHEN COALESCE(stats.approved_games, 0) = 0 THEN 60
-                ELSE COALESCE(pp.ovr, ROUND(u.rating * 10))
-              END AS ovr,
-              COALESCE(pp.main_archetype, 'None') AS main_archetype,
-              COALESCE(pp.mvp_trophies, 0) AS mvp_trophies,
-              COALESCE(pp.matches_played, COALESCE(stats.approved_games, 0)) AS matches_played,
-              EXISTS (
-                SELECT 1
-                FROM teams t
-                INNER JOIN sessions s ON s.id = t.session_id
-                WHERE s.league_id = lm.league_id
-                  AND t.captain_user_id = lm.user_id
-              ) AS is_team_captain
-       FROM league_members lm
-       INNER JOIN users u ON lm.user_id = u.id
-       LEFT JOIN player_profiles pp ON pp.user_id = lm.user_id
-       LEFT JOIN (
-         SELECT league_id, user_id, COUNT(*) AS approved_games
-         FROM stat_submissions
-         WHERE status = 'approved'
-         GROUP BY league_id, user_id
-       ) stats ON stats.league_id = lm.league_id AND stats.user_id = lm.user_id
-       WHERE lm.league_id = ?
-       ORDER BY lm.joined_at ASC`,
-      [leagueId]
-    )
-
-    return res.json({ data: members, count: members.length })
-  } catch (error) {
-    return handleSqlError(res, error)
   }
 })
 
@@ -349,7 +376,7 @@ router.patch('/:leagueId/members/:userId/role', async (req, res) => {
     const primaryOwnerUserId = Number(leagues[0].owner_user_id)
 
     const actorRows = await query(
-      `SELECT role FROM league_members WHERE league_id = ? AND user_id = ? LIMIT 1`,
+      `SELECT role FROM league_members WHERE league_id = ? AND user_id = ? AND is_active = TRUE LIMIT 1`,
       [leagueId, actorId],
     )
     const actorLeagueRole = actorRows[0]?.role ? String(actorRows[0].role).toLowerCase() : ''
@@ -361,7 +388,7 @@ router.patch('/:leagueId/members/:userId/role', async (req, res) => {
     }
 
     const targetRows = await query(
-      'SELECT user_id, role FROM league_members WHERE league_id = ? AND user_id = ? LIMIT 1',
+      'SELECT user_id, role FROM league_members WHERE league_id = ? AND user_id = ? AND is_active = TRUE LIMIT 1',
       [leagueId, userId],
     )
     if (!targetRows.length) {
@@ -385,7 +412,7 @@ router.patch('/:leagueId/members/:userId/role', async (req, res) => {
 
     if (targetRole === 'owner') {
       const countRows = await query(
-        `SELECT COUNT(*) AS c FROM league_members WHERE league_id = ? AND role = 'owner'`,
+        `SELECT COUNT(*) AS c FROM league_members WHERE league_id = ? AND role = 'owner' AND is_active = TRUE`,
         [leagueId],
       )
       const ownerCount = Number(countRows[0]?.c) || 0
@@ -409,7 +436,7 @@ router.patch('/:leagueId/members/:userId/role', async (req, res) => {
 
     if (userId === primaryOwnerUserId && role !== 'owner') {
       const nextOwner = await query(
-        `SELECT user_id FROM league_members WHERE league_id = ? AND role = 'owner' AND user_id <> ? LIMIT 1`,
+        `SELECT user_id FROM league_members WHERE league_id = ? AND role = 'owner' AND user_id <> ? AND is_active = TRUE LIMIT 1`,
         [leagueId, userId],
       )
       if (nextOwner.length) {

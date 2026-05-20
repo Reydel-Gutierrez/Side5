@@ -137,8 +137,8 @@ function Draft() {
   const playerOvrWorth = (player, fallbackName = '—') => {
     if (!player) return { displayName: fallbackName, ovr: '\u2014', worth: 0 }
     const displayName = player.display_name || player.username || fallbackName || 'Player'
-    const worth = Number(player.base_value) || 0
-    const ovr = Number(player.rating) > 0 ? Math.round(Number(player.rating) * 10) : '\u2014'
+    const worth = Number(player.player_worth ?? player.base_value) || 0
+    const ovr = Number(player.ovr) || (Number(player.rating) > 0 ? Math.round(Number(player.rating) * 10) : '\u2014')
     return { displayName, ovr, worth }
   }
 
@@ -613,8 +613,8 @@ function Draft() {
           {filteredAvailable.map((player) => {
             const displayName = player.display_name || player.username || 'Player'
             const rating = Number(player.rating) || 0
-            const overall = rating > 0 ? Math.round(rating * 10) : '\u2014'
-            const worth = Number(player.base_value) || 0
+            const overall = Number(player.ovr) || (rating > 0 ? Math.round(rating * 10) : '\u2014')
+            const worth = Number(player.player_worth ?? player.base_value) || 0
             const activeTeam = teamsDecorated.find((team) => String(team.id) === String(activeTeamId))
             const exceedsBudget = canWriteDraft && activeTeam
               ? Number(activeTeam.budgetUsed) + worth > (Number(session.budget_per_team) || 0)
@@ -710,9 +710,11 @@ function Draft() {
         <Link to={`/sessions/${session.id}`}>
           <SecondaryButton>Back to Session</SecondaryButton>
         </Link>
-        <Link to={`/teams-locked/${session.id}`}>
-          <PrimaryButton className="w-full">View Teams</PrimaryButton>
-        </Link>
+        {allTeamsLocked ? (
+          <Link to={`/game-hub/${session.id}`}>
+            <PrimaryButton className="w-full">Advance to Game Hub</PrimaryButton>
+          </Link>
+        ) : null}
       </div>
 
       {toastMessage ? <p className="meta toast-hint draft-page__toast">{toastMessage}</p> : null}

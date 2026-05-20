@@ -52,7 +52,7 @@ function normalizeApiMember(member) {
     userId: member.user_id,
     name: member.display_name || member.username || 'Player',
     initials: initialsFromDisplayName(member.display_name || member.username || ''),
-    value: Number(member.base_value) || 0,
+    value: Number(member.player_worth ?? member.base_value) || 0,
     overall: Number(member.ovr) || Math.round(rating * 10),
     archetype: member.main_archetype || 'None',
     primaryRole: member.role || 'player',

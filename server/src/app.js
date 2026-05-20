@@ -9,6 +9,7 @@ const leaguesRoutes = require('./routes/leagues.routes')
 const sessionsRoutes = require('./routes/sessions.routes')
 const playersRoutes = require('./routes/players.routes')
 const statsRoutes = require('./routes/stats.routes')
+const statSubmissionsRoutes = require('./routes/statSubmissions.routes')
 
 const app = express()
 
@@ -26,7 +27,12 @@ app.use('/api/health', healthRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/leagues', leaguesRoutes)
 app.use('/api/sessions', sessionsRoutes)
+app.use('/api/stat-submissions', statSubmissionsRoutes)
 app.use('/api/players', playersRoutes)
 app.use('/api', statsRoutes)
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'API route not found', method: _req.method, path: _req.originalUrl })
+})
 
 module.exports = app

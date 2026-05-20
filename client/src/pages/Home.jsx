@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import PrimaryButton from '../components/PrimaryButton'
@@ -6,7 +6,7 @@ import SecondaryButton from '../components/SecondaryButton'
 import SectionLabel from '../components/SectionLabel'
 import SessionCard from '../components/SessionCard'
 import { useMockApp } from '../context/MockAppContext'
-import { apiFetch } from '../utils/apiFetch'
+import { useDbPlayerSummary } from '../hooks/useDbPlayerSummary'
 
 function Home() {
   const {
@@ -25,7 +25,6 @@ function Home() {
   const [joinCode, setJoinCode] = useState('')
   const [joinMsg, setJoinMsg] = useState('')
   const [joinErr, setJoinErr] = useState('')
-  const [dbSummary, setDbSummary] = useState(null)
   const match = matches[0]
   const currentHour = new Date().getHours()
   const timeGreeting = currentHour < 12 ? 'Good morning,' : currentHour < 18 ? 'Good afternoon,' : 'Good evening,'
@@ -33,27 +32,11 @@ function Home() {
   const inAnyLeague = myLeagueIds.length > 0
   const numericUserId = Number.parseInt(String(currentUser?.id ?? ''), 10)
   const isDbUser = !Number.isNaN(numericUserId) && String(numericUserId) === String(currentUser?.id ?? '')
-
-  useEffect(() => {
-    let cancelled = false
-    if (!isDbUser || !currentUser?.id) {
-      setDbSummary(null)
-      return undefined
-    }
-    ;(async () => {
-      try {
-        const leagueId = activeLeague?.id
-        const query = /^\d+$/.test(String(leagueId || '')) ? `?leagueId=${Number.parseInt(String(leagueId), 10)}` : ''
-        const result = await apiFetch(`/api/players/${numericUserId}/summary${query}`, { cache: 'no-store' })
-        if (!cancelled) setDbSummary(result?.data ?? null)
-      } catch {
-        if (!cancelled) setDbSummary(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [isDbUser, currentUser?.id, activeLeague?.id, numericUserId])
+  const { summary: dbSummary } = useDbPlayerSummary(
+    isDbUser ? numericUserId : null,
+    activeLeague?.id,
+    isDbUser && Boolean(currentUser?.id),
+  )
 
   const nextSession =
     sessions
@@ -96,12 +79,20 @@ function Home() {
     mvps: 0,
   }
   const leaguePlayers = activeLeague ? getLeaguePlayers(activeLeague.id) : players
-  const me =
+  const meBase =
     leaguePlayers.find((player) => player.id === currentUser.playerId) ??
     players.find((player) => player.id === currentUser.playerId) ??
     fallbackMe
+  const me = {
+    ...meBase,
+    games: Number(dbSummary?.matches_played) ?? meBase.games ?? 0,
+    rating: Number(dbSummary?.rating) || Number(meBase.rating) || 6,
+    value: Number(dbSummary?.player_worth ?? dbSummary?.total_worth) || Number(meBase.value) || 10,
+    overall: Number(dbSummary?.ovr) || Number(meBase.overall) || Math.round((Number(dbSummary?.rating) || 6) * 10),
+    mvps: Number(dbSummary?.mvp_trophies) ?? meBase.mvps ?? 0,
+  }
   const identity = getPlayerIdentity(me.id, activeLeague?.id ?? null)
-  const heroOverall = Number(dbSummary?.ovr) || Math.round((me.overall ?? me.rating * 10) || 70)
+  const heroOverall = Number(dbSummary?.ovr) || me.overall
   const heroInitials =
     currentUser.initials ||
     String(currentUser.displayName || '')
@@ -112,7 +103,7 @@ function Home() {
       .join('') ||
     'P'
   const heroArchetype = dbSummary?.main_archetype || (identity.hasVotes ? identity.mainArchetype : 'None')
-  const heroWorth = Number(dbSummary?.total_worth ?? me.value ?? 10)
+  const heroWorth = Number(dbSummary?.player_worth ?? dbSummary?.total_worth ?? me.value ?? 10)
   const heroMvps = Number(dbSummary?.mvp_trophies ?? me.mvps ?? 0)
   const heroMatches = Number(dbSummary?.matches_played ?? me.games ?? 0)
   const heroAvatarImage = currentUser.avatarImage || dbSummary?.avatar_image || ''

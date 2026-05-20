@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import ProfilePlayerLayout from '../components/ProfilePlayerLayout'
 import SecondaryButton from '../components/SecondaryButton'
 import SectionLabel from '../components/SectionLabel'
 import { useMockApp } from '../context/MockAppContext'
+import { useDbPlayerSummary } from '../hooks/useDbPlayerSummary'
 import { apiFetch } from '../utils/apiFetch'
 
 function Profile() {
@@ -21,7 +22,13 @@ function Profile() {
   } = useMockApp()
   const avatarInputRef = useRef(null)
   const [avatarHint, setAvatarHint] = useState('')
-  const [dbSummary, setDbSummary] = useState(null)
+  const numericUserId = Number.parseInt(String(currentUser?.id ?? ''), 10)
+  const isDbUser = !Number.isNaN(numericUserId) && String(numericUserId) === String(currentUser?.id ?? '')
+  const { summary: dbSummary } = useDbPlayerSummary(
+    isDbUser ? numericUserId : null,
+    activeLeague?.id,
+    isDbUser,
+  )
 
   if (!currentUser) {
     return <Navigate to="/login" replace />
@@ -49,37 +56,26 @@ function Profile() {
     value: 10,
   }
   const leaguePlayers = activeLeague ? getLeaguePlayers(activeLeague.id) : players
-  const me = leaguePlayers.find((p) => p.id === currentUser.playerId) ?? players.find((p) => p.id === currentUser.playerId) ?? fallbackPlayer
-  const numericUserId = Number.parseInt(String(currentUser?.id ?? ''), 10)
-  const isDbUser = !Number.isNaN(numericUserId) && String(numericUserId) === String(currentUser?.id ?? '')
-
-  useEffect(() => {
-    let cancelled = false
-    if (!isDbUser) {
-      setDbSummary(null)
-      return undefined
-    }
-    ;(async () => {
-      try {
-        const leagueId = activeLeague?.id
-        const query = /^\d+$/.test(String(leagueId || '')) ? `?leagueId=${Number.parseInt(String(leagueId), 10)}` : ''
-        const result = await apiFetch(`/api/players/${numericUserId}/summary${query}`, { cache: 'no-store' })
-        if (!cancelled) setDbSummary(result?.data ?? null)
-      } catch {
-        if (!cancelled) setDbSummary(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [isDbUser, numericUserId, activeLeague?.id])
+  const meBase =
+    leaguePlayers.find((p) => p.id === currentUser.playerId) ??
+    players.find((p) => p.id === currentUser.playerId) ??
+    fallbackPlayer
+  const me = {
+    ...meBase,
+    games: Number(dbSummary?.matches_played) ?? meBase.games ?? 0,
+    goals: Number(dbSummary?.goals) ?? meBase.goals ?? 0,
+    mvps: Number(dbSummary?.mvp_trophies) ?? meBase.mvps ?? 0,
+    rating: Number(dbSummary?.rating) || Number(meBase.rating) || 6,
+    value: Number(dbSummary?.player_worth ?? dbSummary?.total_worth) || Number(meBase.value) || 10,
+    overall: Number(dbSummary?.ovr) || Number(meBase.overall) || Math.round((Number(dbSummary?.rating) || 6) * 10),
+  }
 
   const myRoleInActive = activeLeague ? getLeagueMemberRole(activeLeague.id, currentUser.id) : null
   const identity = getPlayerIdentity(me.id, activeLeague?.id ?? null)
   const radarData = getPlayerAttributeProfile(me.id, activeLeague?.id ?? null)
-  const heroOverall = Number(dbSummary?.ovr) || Math.round((me.overall ?? me.rating * 10) || 70)
+  const heroOverall = Number(dbSummary?.ovr) || me.overall
   const heroArchetype = dbSummary?.main_archetype || (identity.hasVotes ? identity.mainArchetype : 'None')
-  const heroWorth = Number(dbSummary?.total_worth ?? me.value ?? 10)
+  const heroWorth = Number(dbSummary?.player_worth ?? dbSummary?.total_worth ?? me.value ?? 10)
   const heroMvps = Number(dbSummary?.mvp_trophies ?? me.mvps ?? 0)
   const heroMatches = Number(dbSummary?.matches_played ?? me.games ?? 0)
 

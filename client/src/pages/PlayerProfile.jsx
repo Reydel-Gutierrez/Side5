@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Navigate, useSearchParams, useParams } from 'react-router-dom'
 import ProfilePlayerLayout from '../components/ProfilePlayerLayout'
 import { useMockApp } from '../context/MockAppContext'
-import { apiFetch } from '../utils/apiFetch'
+import { useDbPlayerSummary } from '../hooks/useDbPlayerSummary'
 
 function PlayerProfile() {
   const { playerId } = useParams()
   const [searchParams] = useSearchParams()
-  const [dbSummary, setDbSummary] = useState(null)
-  const [summaryLoaded, setSummaryLoaded] = useState(false)
-  const { players, currentUser, activeLeague, getLeaguePlayers, getPlayerIdentity, getPlayerAttributeProfile } = useMockApp()
+  const { players, currentUser, activeLeague, getLeaguePlayers, getPlayerIdentity, getPlayerAttributeProfile } =
+    useMockApp()
   const source = searchParams.get('from')
   const sessionIdBack = searchParams.get('sessionId')
   const backTo =
@@ -21,33 +20,16 @@ function PlayerProfile() {
   const numericProfileId = Number.parseInt(String(playerId ?? ''), 10)
   const canQueryDbProfile = !Number.isNaN(numericProfileId) && String(numericProfileId) === String(playerId ?? '')
 
-  const leaguePlayers = activeLeague ? getLeaguePlayers(activeLeague.id) : players
-  const localPlayer = leaguePlayers.find((item) => String(item.id) === String(playerId)) ?? players.find((item) => String(item.id) === String(playerId))
+  const { summary: dbSummary, loaded: summaryLoaded } = useDbPlayerSummary(
+    canQueryDbProfile ? numericProfileId : null,
+    activeLeague?.id,
+    canQueryDbProfile,
+  )
 
-  useEffect(() => {
-    let cancelled = false
-    if (!canQueryDbProfile) {
-      setDbSummary(null)
-      setSummaryLoaded(true)
-      return undefined
-    }
-    setSummaryLoaded(false)
-    ;(async () => {
-      try {
-        const leagueId = activeLeague?.id
-        const query = /^\d+$/.test(String(leagueId || '')) ? `?leagueId=${Number.parseInt(String(leagueId), 10)}` : ''
-        const result = await apiFetch(`/api/players/${numericProfileId}/summary${query}`, { cache: 'no-store' })
-        if (!cancelled) setDbSummary(result?.data ?? null)
-      } catch {
-        if (!cancelled) setDbSummary(null)
-      } finally {
-        if (!cancelled) setSummaryLoaded(true)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [activeLeague?.id, canQueryDbProfile, numericProfileId])
+  const leaguePlayers = activeLeague ? getLeaguePlayers(activeLeague.id) : players
+  const localPlayer =
+    leaguePlayers.find((item) => String(item.id) === String(playerId)) ??
+    players.find((item) => String(item.id) === String(playerId))
 
   const player = useMemo(() => {
     if (localPlayer) {
@@ -58,13 +40,9 @@ function PlayerProfile() {
         assists: Number(dbSummary?.assists) || localPlayer.assists || 0,
         saves: Number(dbSummary?.saves) || localPlayer.saves || 0,
         mvps: Number(dbSummary?.mvp_trophies) || localPlayer.mvps || 0,
-        value: Number(dbSummary?.total_worth) || localPlayer.value || 10,
-        overall: Number(dbSummary?.ovr) || localPlayer.overall || Math.round((localPlayer.rating || 7) * 10),
-        rating:
-          (Number(dbSummary?.ovr) && Number(dbSummary?.ovr) / 10) ||
-          Number(dbSummary?.rating) ||
-          localPlayer.rating ||
-          7,
+        rating: Number(dbSummary?.rating) || Number(localPlayer.rating) || 6,
+        value: Number(dbSummary?.player_worth ?? dbSummary?.total_worth) || localPlayer.value || 10,
+        overall: Number(dbSummary?.ovr) || localPlayer.overall || Math.round((Number(dbSummary?.rating) || 6) * 10),
       }
     }
     if (!dbSummary) return null
@@ -76,6 +54,7 @@ function PlayerProfile() {
         .slice(0, 2)
         .map((part) => part[0]?.toUpperCase() ?? '')
         .join('') || 'P'
+    const rating = Number(dbSummary.rating) || 6
     return {
       id: String(playerId),
       name: displayName,
@@ -86,9 +65,9 @@ function PlayerProfile() {
       saves: Number(dbSummary.saves) || 0,
       mvps: Number(dbSummary.mvp_trophies) || 0,
       winRate: 0,
-      rating: (Number(dbSummary.ovr) && Number(dbSummary.ovr) / 10) || Number(dbSummary.rating) || 6,
-      value: Number(dbSummary.total_worth) || Number(dbSummary.base_value) || 10,
-      overall: Number(dbSummary.ovr) || Math.round(((Number(dbSummary.rating) || 6) * 10)),
+      rating,
+      value: Number(dbSummary.player_worth ?? dbSummary.total_worth) || 10,
+      overall: Number(dbSummary.ovr) || Math.round(rating * 10),
     }
   }, [dbSummary, localPlayer, playerId])
 
@@ -105,12 +84,13 @@ function PlayerProfile() {
 
   const identity = getPlayerIdentity(player.id, activeLeague?.id ?? null)
   const radarData = getPlayerAttributeProfile(player.id, activeLeague?.id ?? null)
-  const heroOverall = Number(dbSummary?.ovr) || Math.round((player.overall ?? player.rating * 10) || 70)
+  const heroOverall = Number(dbSummary?.ovr) || player.overall
   const heroArchetype = dbSummary?.main_archetype || (identity.hasVotes ? identity.mainArchetype : 'None')
-  const heroWorth = Number(dbSummary?.total_worth ?? player.value ?? 10)
+  const heroWorth = Number(dbSummary?.player_worth ?? dbSummary?.total_worth ?? player.value ?? 10)
   const heroMvps = Number(dbSummary?.mvp_trophies ?? player.mvps ?? 0)
   const heroMatches = Number(dbSummary?.matches_played ?? player.games ?? 0)
-  const heroAvatarImage = dbSummary?.avatar_image || player.avatarImage || (currentUser?.playerId === player.id ? currentUser.avatarImage || '' : '')
+  const heroAvatarImage =
+    dbSummary?.avatar_image || player.avatarImage || (currentUser?.playerId === player.id ? currentUser.avatarImage || '' : '')
 
   const accountDetails =
     currentUser?.playerId === player.id
@@ -118,8 +98,6 @@ function PlayerProfile() {
           email: currentUser.email,
           displayName: currentUser.displayName,
           username: currentUser.username,
-          phone: currentUser.phone,
-          memberSince: currentUser.memberSince,
           playerId: currentUser.playerId,
         }
       : null
@@ -129,20 +107,23 @@ function PlayerProfile() {
       player={player}
       backTo={backTo}
       accountDetails={accountDetails}
-      profileCardData={{
-        greeting: 'Player profile,',
-        displayName: dbSummary?.display_name || player.name,
-        overall: heroOverall,
-        totalWorth: heroWorth.toFixed(1),
-        archetype: heroArchetype,
-        mvpTrophies: heroMvps,
-        matchesPlayed: heroMatches,
-        avatarImage: heroAvatarImage,
-        avatarFallback: player.initials,
-      }}
+      profileCardData={
+        accountDetails
+          ? null
+          : {
+              greeting: 'Player profile,',
+              displayName: player.name,
+              overall: heroOverall,
+              totalWorth: heroWorth.toFixed(1),
+              archetype: heroArchetype,
+              mvpTrophies: heroMvps,
+              matchesPlayed: heroMatches,
+              avatarImage: heroAvatarImage,
+              avatarFallback: player.initials,
+            }
+      }
       identityExtra={null}
       radarData={radarData}
-      afterRadar={null}
     />
   )
 }

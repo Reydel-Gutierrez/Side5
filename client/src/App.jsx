@@ -17,6 +17,7 @@ import Sessions from './pages/Sessions'
 import Stats from './pages/Stats'
 import PostMatchReport from './pages/PostMatchReport'
 import TeamsLocked from './pages/TeamsLocked'
+import GameHub from './pages/GameHub'
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
         <Route path="/sessions" element={<Sessions />} />
         <Route path="/sessions/:sessionId" element={<SessionDetails />} />
         <Route path="/draft/:sessionId" element={<Draft />} />
+        <Route path="/game-hub/:sessionId" element={<GameHub />} />
         <Route path="/teams-locked/:sessionId" element={<TeamsLocked />} />
         <Route path="/matches/:matchId" element={<MatchResult />} />
         <Route path="/matches/:matchId/post-match" element={<PostMatchReport />} />
