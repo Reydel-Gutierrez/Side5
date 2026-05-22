@@ -2,10 +2,29 @@ import { useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import ProfilePlayerLayout from '../components/ProfilePlayerLayout'
 import SecondaryButton from '../components/SecondaryButton'
-import SectionLabel from '../components/SectionLabel'
 import { useMockApp } from '../context/MockAppContext'
 import { useDbPlayerSummary } from '../hooks/useDbPlayerSummary'
-import { apiFetch } from '../utils/apiFetch'
+import { safeNumber } from '../utils/safeNumber'
+
+function LeagueShieldIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="M12 3 4 6.5v5.8c0 4.8 3.4 9.3 8 10.7 4.6-1.4 8-5.9 8-10.7V6.5L12 3Z" />
+      <path d="M9.5 12.2 11.2 14l3.8-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function ProfileSectionHead({ icon, children }) {
+  return (
+    <div className="home-section-head profile-section-head">
+      <span className="home-section-head__icon" aria-hidden="true">
+        {icon}
+      </span>
+      <p className="home-section-head__label">{children}</p>
+    </div>
+  )
+}
 
 function Profile() {
   const navigate = useNavigate()
@@ -62,22 +81,25 @@ function Profile() {
     fallbackPlayer
   const me = {
     ...meBase,
-    games: Number(dbSummary?.matches_played) ?? meBase.games ?? 0,
-    goals: Number(dbSummary?.goals) ?? meBase.goals ?? 0,
-    mvps: Number(dbSummary?.mvp_trophies) ?? meBase.mvps ?? 0,
-    rating: Number(dbSummary?.rating) || Number(meBase.rating) || 6,
-    value: Number(dbSummary?.player_worth ?? dbSummary?.total_worth) || Number(meBase.value) || 10,
-    overall: Number(dbSummary?.ovr) || Number(meBase.overall) || Math.round((Number(dbSummary?.rating) || 6) * 10),
+    games: safeNumber(dbSummary?.matches_played ?? meBase.games, 0),
+    goals: safeNumber(dbSummary?.goals ?? meBase.goals, 0),
+    mvps: safeNumber(dbSummary?.mvp_trophies ?? meBase.mvps, 0),
+    rating: safeNumber(dbSummary?.rating ?? meBase.rating, 6),
+    value: safeNumber(dbSummary?.player_worth ?? dbSummary?.total_worth ?? meBase.value, 10),
+    overall: safeNumber(
+      dbSummary?.ovr ?? meBase.overall,
+      Math.round(safeNumber(dbSummary?.rating ?? meBase.rating, 6) * 10),
+    ),
   }
 
   const myRoleInActive = activeLeague ? getLeagueMemberRole(activeLeague.id, currentUser.id) : null
   const identity = getPlayerIdentity(me.id, activeLeague?.id ?? null)
   const radarData = getPlayerAttributeProfile(me.id, activeLeague?.id ?? null)
-  const heroOverall = Number(dbSummary?.ovr) || me.overall
+  const heroOverall = safeNumber(dbSummary?.ovr ?? me.overall, me.overall)
   const heroArchetype = dbSummary?.main_archetype || (identity.hasVotes ? identity.mainArchetype : 'None')
-  const heroWorth = Number(dbSummary?.player_worth ?? dbSummary?.total_worth ?? me.value ?? 10)
-  const heroMvps = Number(dbSummary?.mvp_trophies ?? me.mvps ?? 0)
-  const heroMatches = Number(dbSummary?.matches_played ?? me.games ?? 0)
+  const heroWorth = safeNumber(dbSummary?.player_worth ?? dbSummary?.total_worth ?? me.value, 10)
+  const heroMvps = safeNumber(dbSummary?.mvp_trophies ?? me.mvps, 0)
+  const heroMatches = safeNumber(dbSummary?.matches_played ?? me.games, 0)
 
   const triggerAvatarPicker = () => {
     avatarInputRef.current?.click()
@@ -111,7 +133,6 @@ function Profile() {
     if (!ctx) return imageDataUrl
     ctx.drawImage(image, 0, 0, targetWidth, targetHeight)
 
-    // Gradually lower quality if needed so backend payload stays safely small.
     const qualitySteps = [0.88, 0.8, 0.72, 0.64, 0.56]
     for (const quality of qualitySteps) {
       const compressed = canvas.toDataURL('image/jpeg', quality)
@@ -159,31 +180,46 @@ function Profile() {
 
   const leagueBlock = (
     <>
-      <SectionLabel>Active league</SectionLabel>
-      <section className="card profile-league-card">
+      <ProfileSectionHead icon={<LeagueShieldIcon />}>Active League</ProfileSectionHead>
+      <section className="card home-league-card profile-league-card">
         {activeLeague ? (
           <>
-            <p className="session-title">{activeLeague.name}</p>
-            {myRoleInActive ? (
-              <p className="meta" style={{ marginBottom: 8 }}>
-                Your role in this league: <strong style={{ textTransform: 'capitalize' }}>{myRoleInActive}</strong>
-              </p>
-            ) : null}
-            <p className="meta invite-code-line">
-              Invite: <span className="invite-code">{activeLeague.inviteCode}</span>
-            </p>
-            <p className="meta">
-              {activeLeague.memberCount} players · {activeLeague.sessionCount} sessions
-            </p>
-            <div className="button-row">
+            <div className="home-dashboard-card__body">
+              <div className="home-dashboard-card__icon home-dashboard-card__icon--league" aria-hidden="true">
+                <LeagueShieldIcon />
+              </div>
+              <div className="home-dashboard-card__content">
+                <p className="home-dashboard-card__title">{activeLeague.name}</p>
+                {myRoleInActive ? (
+                  <p className="home-dashboard-card__meta">
+                    Your role: <span className="profile-role-pill">{myRoleInActive}</span>
+                  </p>
+                ) : null}
+                <p className="home-dashboard-card__meta">
+                  {activeLeague.memberCount} players · {activeLeague.sessionCount} sessions
+                </p>
+                <p className="home-dashboard-card__meta home-dashboard-card__meta--accent">
+                  Invite code: <span className="invite-code">{activeLeague.inviteCode}</span>
+                </p>
+              </div>
+            </div>
+            <div className="button-row home-card-actions">
               <Link to="/league" className="w-full">
-                <SecondaryButton className="w-full">League hub</SecondaryButton>
+                <SecondaryButton className="w-full home-btn-secondary home-btn-secondary--solo">
+                  <span className="home-btn__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                      <path d="M4 20a8 8 0 0 1 16 0" strokeLinecap="round" />
+                      <circle cx="12" cy="8" r="3" />
+                    </svg>
+                  </span>
+                  League Hub
+                </SecondaryButton>
               </Link>
             </div>
           </>
         ) : (
           <>
-            <p className="meta">No active league selected.</p>
+            <p className="meta home-empty-hint">No active league selected.</p>
             <Link to="/league" className="profile-inline-link">
               Open league
             </Link>
@@ -213,18 +249,16 @@ function Profile() {
           avatarHint,
         }}
         identityExtra={
-          <>
-            <SecondaryButton
-              type="button"
-              className="w-full"
-              onClick={() => {
-                logout()
-                navigate('/', { replace: true })
-              }}
-            >
-              Log out
-            </SecondaryButton>
-          </>
+          <SecondaryButton
+            type="button"
+            className="w-full home-btn-secondary profile-logout-btn"
+            onClick={() => {
+              logout()
+              navigate('/', { replace: true })
+            }}
+          >
+            Log out
+          </SecondaryButton>
         }
         radarData={radarData}
         afterRadar={leagueBlock}

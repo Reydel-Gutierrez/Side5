@@ -7,6 +7,7 @@ import StatusChip from '../components/StatusChip'
 import { useMockApp } from '../context/MockAppContext'
 import { apiFetch } from '../utils/apiFetch'
 import { sessionStatusTone } from '../utils/sessionStatus'
+import { isPastSession } from '../utils/sessionPast'
 
 const TEAM_HEADER_CLASS = ['draft-team-col--a', 'draft-team-col--b', 'draft-team-col--c', 'draft-team-col--d']
 
@@ -29,6 +30,7 @@ function statusLabelForSession(status) {
   if (s === 'drafting') return 'Drafting'
   if (s === 'locked') return 'Locked'
   if (s === 'completed') return 'Completed'
+  if (s === 'past') return 'Past'
   if (s === 'open') return 'Open'
   return s ? s.replace(/_/g, ' ') : 'Draft'
 }
@@ -363,6 +365,10 @@ function Draft() {
   }
   if (!session) return <Navigate to="/sessions" replace />
 
+  if (isPastSession(session)) {
+    return <Navigate to={`/game-hub/${sessionId}`} replace />
+  }
+
   const statusTone = String(session.status || '').toLowerCase() === 'drafting' ? 'orange' : sessionStatusTone(session.status)
   const statusChipLabel = statusLabelForSession(session.status)
   const boardManyTeams = teamsDecorated.length >= 4
@@ -378,6 +384,17 @@ function Draft() {
       />
 
       {error ? <p className="meta draft-page__error">{error}</p> : null}
+
+      <div className="draft-page__nav">
+        <Link to={`/sessions/${session.id}`}>
+          <SecondaryButton>Back to Session</SecondaryButton>
+        </Link>
+        {allTeamsLocked ? (
+          <Link to={`/game-hub/${session.id}`}>
+            <PrimaryButton>Advance to Game Hub</PrimaryButton>
+          </Link>
+        ) : null}
+      </div>
 
       <p className="draft-page__description">
         Captains build their teams. All players can <span className="draft-page__description-accent">watch the draft</span>.
@@ -705,17 +722,6 @@ function Draft() {
           </p>
         </div>
       </section>
-
-      <div className="button-row">
-        <Link to={`/sessions/${session.id}`}>
-          <SecondaryButton>Back to Session</SecondaryButton>
-        </Link>
-        {allTeamsLocked ? (
-          <Link to={`/game-hub/${session.id}`}>
-            <PrimaryButton className="w-full">Advance to Game Hub</PrimaryButton>
-          </Link>
-        ) : null}
-      </div>
 
       {toastMessage ? <p className="meta toast-hint draft-page__toast">{toastMessage}</p> : null}
     </div>

@@ -10,7 +10,15 @@ function handleSqlError(res, error) {
 router.post('/:submissionId/reviews', async (req, res) => {
   const submissionId = Number.parseInt(req.params.submissionId, 10)
   const reviewerUserId = Number.parseInt(String(req.body?.reviewerUserId ?? req.body?.userId ?? ''), 10)
-  const { decision, decline_note: declineNote, declineNote: declineNoteCamel } = req.body
+  const {
+    decision,
+    decline_note: declineNote,
+    declineNote: declineNoteCamel,
+    rating_label: ratingLabelSnake,
+    rating_value: ratingValueSnake,
+    ratingLabel: ratingLabelCamel,
+    ratingValue: ratingValueCamel,
+  } = req.body
 
   if (Number.isNaN(submissionId)) {
     return res.status(400).json({ error: 'Invalid submission id' })
@@ -23,6 +31,8 @@ router.post('/:submissionId/reviews', async (req, res) => {
     const outcome = await submitReview(submissionId, reviewerUserId, {
       decision,
       declineNote: declineNote ?? declineNoteCamel,
+      ratingLabel: ratingLabelSnake ?? ratingLabelCamel,
+      ratingValue: ratingValueSnake ?? ratingValueCamel,
     })
     if (outcome.error) {
       return res.status(outcome.status || 400).json({ error: outcome.error })

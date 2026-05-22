@@ -205,7 +205,10 @@ async function assertActorCanManageLeague(actorId, leagueId) {
   return { ok: true, role }
 }
 
-const SESSION_STATUSES = new Set(['open', 'draft_pending', 'drafting', 'locked', 'completed'])
+const SESSION_STATUSES = new Set(['open', 'draft_pending', 'drafting', 'locked', 'completed', 'past'])
+
+const SESSION_PAST_SQL = `(COALESCE(s.stats_finalized, 0) = 1 OR s.status IN ('past', 'completed'))`
+const SESSION_ACTIVE_SQL = `(COALESCE(s.stats_finalized, 0) = 0 AND s.status NOT IN ('past', 'completed'))`
 
 const DEFAULT_SESSION_TEAMS = [{ name: 'Side A' }, { name: 'Side B' }]
 
@@ -387,15 +390,41 @@ function toSqlDate(value) {
   return s
 }
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  const includePast =
+    String(req.query.includePast ?? '').toLowerCase() === 'true' ||
+    String(req.query.includePast ?? '') === '1'
+  const pastOnly =
+    String(req.query.pastOnly ?? '').toLowerCase() === 'true' ||
+    String(req.query.pastOnly ?? '') === '1'
+  const leagueId = Number.parseInt(String(req.query.leagueId ?? ''), 10)
+  const hasLeagueFilter = !Number.isNaN(leagueId)
+
   try {
+    const where = []
+    const params = []
+    if (pastOnly) {
+      where.push(SESSION_PAST_SQL)
+    } else if (!includePast) {
+      where.push(SESSION_ACTIVE_SQL)
+    }
+    if (hasLeagueFilter) {
+      where.push('s.league_id = ?')
+      params.push(leagueId)
+    }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : ''
+
     const sessions = await query(
       `SELECT s.id, s.league_id, s.title, s.session_date, s.session_time, s.location,
               s.format, s.budget_per_team, s.status, s.created_by_user_id, s.created_at,
+              COALESCE(s.stats_finalized, 0) AS stats_finalized,
+              s.stats_finalized_at, s.stats_finalized_by,
               l.name AS league_name
        FROM sessions s
        INNER JOIN leagues l ON s.league_id = l.id
-       ORDER BY s.session_date ASC, s.session_time ASC`
+       ${whereClause}
+       ORDER BY s.session_date DESC, s.session_time DESC`,
+      params,
     )
     return res.json({ data: sessions, count: sessions.length })
   } catch (error) {
@@ -1118,6 +1147,8 @@ router.get('/:id', async (req, res) => {
     const sessions = await query(
       `SELECT s.id, s.league_id, s.title, s.session_date, s.session_time, s.location,
               s.format, s.budget_per_team, s.status, s.created_by_user_id, s.created_at,
+              COALESCE(s.stats_finalized, 0) AS stats_finalized,
+              s.stats_finalized_at, s.stats_finalized_by,
               l.name AS league_name
        FROM sessions s
        INNER JOIN leagues l ON s.league_id = l.id

@@ -24,7 +24,7 @@ export default function LeagueAdminModal({ open, onClose, panelProps }) {
       >
         <div className="modal-header">
           <h2 id="league-admin-modal-title" className="page-title">
-            League administration
+            League Administration
           </h2>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             ×

@@ -73,8 +73,8 @@ function PlayerProfile() {
 
   if (!player && !summaryLoaded) {
     return (
-      <div className="screen">
-        <section className="card">
+      <div className="screen profile-screen">
+        <section className="card profile-panel-card profile-loading-card">
           <p className="meta">Loading player profile...</p>
         </section>
       </div>

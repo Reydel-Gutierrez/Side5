@@ -61,7 +61,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   format VARCHAR(20) DEFAULT '5v5',
   budget_per_team DECIMAL(6,2) DEFAULT 50.00,
   bench_shuffle_done TINYINT(1) NOT NULL DEFAULT 0,
-  status ENUM('open', 'draft_pending', 'drafting', 'locked', 'completed') DEFAULT 'open',
+  stats_finalized BOOLEAN NOT NULL DEFAULT FALSE,
+  stats_finalized_at DATETIME NULL,
+  stats_finalized_by INT NULL,
+  status ENUM('open', 'draft_pending', 'drafting', 'locked', 'completed', 'past') DEFAULT 'open',
   created_by_user_id INT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (league_id) REFERENCES leagues(id),
@@ -124,6 +127,8 @@ CREATE TABLE IF NOT EXISTS player_stat_submissions (
   result ENUM('win', 'loss') NOT NULL,
   note TEXT NULL,
   status ENUM('pending', 'approved', 'declined') NOT NULL DEFAULT 'pending',
+  applied_to_league_members BOOLEAN NOT NULL DEFAULT FALSE,
+  approved_rating DECIMAL(3,1) NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_session_user (session_id, user_id),
@@ -137,6 +142,8 @@ CREATE TABLE IF NOT EXISTS player_stat_reviews (
   submission_id INT NOT NULL,
   reviewer_user_id INT NOT NULL,
   decision ENUM('pending', 'accepted', 'declined') NOT NULL DEFAULT 'pending',
+  rating_label VARCHAR(16) NULL,
+  rating_value DECIMAL(3,1) NULL,
   decline_note TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -155,6 +162,21 @@ CREATE TABLE IF NOT EXISTS player_stat_review_slots (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
   FOREIGN KEY (reviewer_user_id) REFERENCES users(id),
   FOREIGN KEY (target_user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS session_mvp_votes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  session_id INT NOT NULL,
+  league_id INT NOT NULL,
+  voter_user_id INT NOT NULL,
+  voted_user_id INT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_session_voter (session_id, voter_user_id),
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (league_id) REFERENCES leagues(id),
+  FOREIGN KEY (voter_user_id) REFERENCES users(id),
+  FOREIGN KEY (voted_user_id) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS stat_submissions (

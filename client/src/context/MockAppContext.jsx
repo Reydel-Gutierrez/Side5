@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { autoBalanceTeams } from '../utils/draftUtils'
 import { formatDateFromIso, formatTimeDisplay } from '../utils/sessionDisplay'
 import { sessionRosterIds } from '../utils/sessionRoster'
+import { isPastSession } from '../utils/sessionPast'
 import { apiFetch } from '../utils/apiFetch'
 
 const users = []
@@ -52,6 +53,8 @@ function mapApiSessionRowToClient(s) {
     maxPlayers: 10,
     players: [],
     status: s.status || 'open',
+    stats_finalized: Boolean(s.stats_finalized) || Number(s.stats_finalized) === 1,
+    stats_finalized_at: s.stats_finalized_at ?? null,
   }
 }
 
@@ -640,7 +643,7 @@ export function MockAppProvider({ children }) {
     try {
       const [mineRes, sessRes] = await Promise.all([
         apiFetch(`/api/leagues/mine?userId=${uid}`),
-        apiFetch('/api/sessions'),
+        apiFetch('/api/sessions?includePast=1'),
       ])
       const mineRows = Array.isArray(mineRes?.data) ? mineRes.data : []
       const idSet = new Set(mineRows.map((r) => Number(r.id)))
@@ -714,7 +717,7 @@ export function MockAppProvider({ children }) {
       const leagueSessions = sessions.filter((s) => String(s.leagueId) === String(league.id))
       const memberPlayerCount = getLeagueMemberPlayerIds(league.id).length
       const upcoming = [...leagueSessions]
-        .filter((s) => s.status !== 'completed')
+        .filter((s) => !isPastSession(s))
         .sort((a, b) => `${a.dateIso}T${a.time24}`.localeCompare(`${b.dateIso}T${b.time24}`))
       const apiMembers = Number(league.memberCount) || 0
       const apiSessions = Number(league.sessionCount) || 0

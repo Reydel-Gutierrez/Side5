@@ -2,23 +2,43 @@ import { useState } from 'react'
 import PrimaryButton from './PrimaryButton'
 import SecondaryButton from './SecondaryButton'
 
+const DEFAULT_RATING_OPTIONS = [
+  { label: 'Trash', value: 4 },
+  { label: 'Bad', value: 5 },
+  { label: 'Mid', value: 6.5 },
+  { label: 'Good', value: 8 },
+  { label: 'Beast', value: 10 },
+]
+
 function targetLabel(assignment) {
   return assignment?.target_display_name || assignment?.target_username || 'Player'
 }
 
-export default function GameHubReviewModal({ open, assignment, busy, onClose, onSubmitReview }) {
+export default function GameHubReviewModal({
+  open,
+  assignment,
+  busy,
+  readOnly = false,
+  ratingOptions = DEFAULT_RATING_OPTIONS,
+  onClose,
+  onSubmitReview,
+}) {
   const [declineNote, setDeclineNote] = useState('')
+  const [selectedRating, setSelectedRating] = useState(null)
 
   if (!open || !assignment) return null
 
   const handleAccept = () => {
-    onSubmitReview?.(assignment, 'accepted')
+    if (!selectedRating) return
+    onSubmitReview?.(assignment, 'accepted', undefined, selectedRating)
   }
 
   const handleDecline = () => {
     if (!declineNote.trim()) return
     onSubmitReview?.(assignment, 'declined', declineNote.trim())
   }
+
+  const reviewed = String(assignment.review_decision || 'pending') !== 'pending'
 
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
@@ -31,7 +51,7 @@ export default function GameHubReviewModal({ open, assignment, busy, onClose, on
       >
         <div className="modal-header">
           <h2 id="game-hub-review-title" className="page-title">
-            Review {targetLabel(assignment)}
+            {readOnly ? 'Stats for' : 'Review'} {targetLabel(assignment)}
           </h2>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             ×
@@ -44,28 +64,79 @@ export default function GameHubReviewModal({ open, assignment, busy, onClose, on
         </p>
         {assignment.note ? <p className="meta">Note: {assignment.note}</p> : null}
 
-        <div className="field">
-          <label className="field-label" htmlFor="game-hub-review-decline-note">
-            Decline note (required if declining)
-          </label>
-          <input
-            id="game-hub-review-decline-note"
-            className="field-input"
-            type="text"
-            value={declineNote}
-            onChange={(e) => setDeclineNote(e.target.value)}
-            disabled={busy}
-          />
-        </div>
+        {readOnly || reviewed ? (
+          <>
+            {reviewed ? (
+              <p className="meta">
+                Your decision: {assignment.review_decision}
+                {assignment.rating_label
+                  ? ` · ${assignment.rating_label} (${assignment.rating_value})`
+                  : ''}
+              </p>
+            ) : null}
+            <div className="modal-actions">
+              <SecondaryButton type="button" className="w-full" onClick={onClose}>
+                Close
+              </SecondaryButton>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="field">
+              <span className="field-label">Performance rating (required to accept)</span>
+              <div className="game-hub-rating-picks" role="group" aria-label="Performance rating">
+                {ratingOptions.map((opt) => {
+                  const active =
+                    selectedRating?.label === opt.label && selectedRating?.value === opt.value
+                  return (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      className={`game-hub-rating-pick${active ? ' is-active' : ''}`}
+                      disabled={busy}
+                      onClick={() => setSelectedRating(opt)}
+                    >
+                      {opt.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
 
-        <div className="modal-actions button-row">
-          <PrimaryButton type="button" className="w-full" disabled={busy} onClick={handleAccept}>
-            Accept
-          </PrimaryButton>
-          <SecondaryButton type="button" className="w-full" disabled={busy || !declineNote.trim()} onClick={handleDecline}>
-            Decline
-          </SecondaryButton>
-        </div>
+            <div className="field">
+              <label className="field-label" htmlFor="game-hub-review-decline-note">
+                Decline note (required if declining)
+              </label>
+              <input
+                id="game-hub-review-decline-note"
+                className="field-input"
+                type="text"
+                value={declineNote}
+                onChange={(e) => setDeclineNote(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+
+            <div className="modal-actions button-row">
+              <PrimaryButton
+                type="button"
+                className="w-full"
+                disabled={busy || !selectedRating}
+                onClick={handleAccept}
+              >
+                Accept with rating
+              </PrimaryButton>
+              <SecondaryButton
+                type="button"
+                className="w-full"
+                disabled={busy || !declineNote.trim()}
+                onClick={handleDecline}
+              >
+                Decline
+              </SecondaryButton>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

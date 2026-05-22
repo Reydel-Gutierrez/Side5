@@ -103,7 +103,7 @@ export default function LeagueManagementPanel({
     <div className={rootClass}>
       {!embeddedInModal ? (
         <>
-          <p className="session-title league-admin-panel__title">League administration</p>
+          <p className="session-title league-admin-panel__title">League Administration</p>
           <p className="meta league-admin-panel__intro">All changes are saved to the database.</p>
         </>
       ) : null}

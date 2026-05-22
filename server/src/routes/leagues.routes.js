@@ -97,6 +97,58 @@ router.get('/mine', async (req, res) => {
   }
 })
 
+/** Past sessions for a league (stats finalized or status past/completed). */
+router.get('/:id/sessions/past', async (req, res) => {
+  const leagueId = Number.parseInt(req.params.id, 10)
+  const userId = Number.parseInt(String(req.query.userId ?? ''), 10)
+
+  if (Number.isNaN(leagueId)) {
+    return res.status(400).json({ error: 'Invalid league id' })
+  }
+  if (Number.isNaN(userId)) {
+    return res.status(400).json({ error: 'userId query parameter is required and must be a number' })
+  }
+
+  try {
+    const leagues = await query('SELECT id, name FROM leagues WHERE id = ? LIMIT 1', [leagueId])
+    if (!leagues.length) {
+      return res.status(404).json({ error: 'League not found' })
+    }
+
+    const membership = await query(
+      'SELECT user_id FROM league_members WHERE league_id = ? AND user_id = ? LIMIT 1',
+      [leagueId, userId],
+    )
+    if (!membership.length) {
+      return res.status(403).json({ error: 'You are not a member of this league' })
+    }
+
+    const sessions = await query(
+      `SELECT s.id, s.league_id, s.title, s.session_date, s.session_time, s.location,
+              s.format, s.status,
+              COALESCE(s.stats_finalized, 0) AS stats_finalized,
+              s.stats_finalized_at,
+              l.name AS league_name,
+              (SELECT COUNT(*) FROM teams t WHERE t.session_id = s.id) AS team_count,
+              (SELECT COUNT(DISTINCT tp.user_id)
+               FROM team_players tp
+               INNER JOIN teams t ON t.id = tp.team_id
+               WHERE t.session_id = s.id) AS player_count
+       FROM sessions s
+       INNER JOIN leagues l ON l.id = s.league_id
+       WHERE s.league_id = ?
+         AND (COALESCE(s.stats_finalized, 0) = 1 OR s.status IN ('past', 'completed'))
+       ORDER BY COALESCE(s.stats_finalized_at, s.session_date) DESC, s.session_time DESC`,
+      [leagueId],
+    )
+
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+    return res.json({ data: sessions, count: sessions.length, league_name: leagues[0].name })
+  } catch (error) {
+    return handleSqlError(res, error)
+  }
+})
+
 router.get('/:id/leaderboard', async (req, res) => {
   const leagueId = Number.parseInt(req.params.id, 10)
   if (Number.isNaN(leagueId)) {

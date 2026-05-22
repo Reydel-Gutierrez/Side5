@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import PageHeader from '../components/PageHeader'
-import Tabs from '../components/Tabs'
 import { useMockApp } from '../context/MockAppContext'
 import { fetchLeaderboardFromApi, mapApiLeaderboardPlayer } from '../utils/leaderboardApi'
 
@@ -11,13 +9,6 @@ const LEADERBOARD_TABS = [
   { id: 'mvp', label: 'MVP' },
   { id: 'matches', label: 'Matches' },
 ]
-
-const TABLE_CONFIG = {
-  rating: { hint: 'Sorted by rating, then matches played, then goals.' },
-  goals: { hint: 'Sorted by goals scored in this league.' },
-  mvp: { hint: 'Sorted by MVP awards in this league.' },
-  matches: { hint: 'Sorted by matches played in this league.' },
-}
 
 function initialsFromName(name) {
   return (
@@ -67,78 +58,328 @@ function rankPlayers(players, sortKey) {
   return sorted
 }
 
-function LeaderboardTable({ players, sortKey }) {
-  const rows = useMemo(() => rankPlayers(players, sortKey), [players, sortKey])
-  const config = TABLE_CONFIG[sortKey]
+/** Desktop grid order: active sort column last (rightmost). Rank=1, player=2. */
+const DESKTOP_COLUMN_ORDER = {
+  rating: { rating: 7, matches: 3, goals: 4, wl: 5, mvp: 6 },
+  goals: { rating: 3, matches: 4, goals: 7, wl: 5, mvp: 6 },
+  mvp: { rating: 3, matches: 4, goals: 5, wl: 6, mvp: 7 },
+  matches: { rating: 3, matches: 7, goals: 4, wl: 5, mvp: 6 },
+}
+
+function featuredStatFor(player, sortKey) {
+  if (sortKey === 'goals') return { label: 'Goals', value: String(player.goals) }
+  if (sortKey === 'mvp') return { label: 'MVP', value: String(player.mvp) }
+  if (sortKey === 'matches') return { label: 'MP', value: String(player.matchesPlayed) }
+  return { label: 'Rating', value: formatRating(player.rating) }
+}
+
+function computeSummary(players) {
+  if (!players.length) {
+    return { playerCount: 0, matchCount: 0, avgRating: '—', mvpTotal: 0 }
+  }
+  const playerCount = players.length
+  const matchCount = Math.max(0, ...players.map((p) => p.matchesPlayed))
+  const avgRating = players.reduce((sum, p) => sum + p.rating, 0) / playerCount
+  const mvpTotal = players.reduce((sum, p) => sum + p.mvp, 0)
+  return {
+    playerCount,
+    matchCount,
+    avgRating: formatRating(avgRating),
+    mvpTotal,
+  }
+}
+
+function LeaderboardIcon({ name }) {
+  if (name === 'users') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M15 12a3 3 0 1 0-3-3 3 3 0 0 0 3 3Z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (name === 'calendar') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="4" y="5" width="16" height="14" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M8 3.8v2.7M16 3.8v2.7M4 9.5h16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (name === 'star') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M12 3l2.2 6.8H21l-5.5 4 2.1 6.7L12 16.8 6.4 20.5l2.1-6.7L3 9.8h6.8L12 3Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+        />
+      </svg>
+    )
+  }
+  if (name === 'trophy') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 6h8v3a4 4 0 0 1-8 0V6Z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M6 6H4v1a2 2 0 0 0 2 2M18 6h2v1a2 2 0 0 1-2 2M12 13v3M9 20h6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (name === 'shield') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3l7 3v6c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6l7-3Z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    )
+  }
+  if (name === 'crown') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 16h14l-1.2-7.2-2.8 3.4-3-5.8-3 5.8-2.8-3.4L5 16Z" fill="currentColor" opacity="0.9" />
+        <path d="M6 16v3h12v-3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (name === 'info') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M12 10v6M12 8h.01" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  return null
+}
+
+function LeaderboardHero({ leagueName, contextNote }) {
+  return (
+    <section className="lb-hero" aria-labelledby="lb-page-title">
+      <div className="lb-hero__bg" aria-hidden="true">
+        <div className="lb-hero__ball" />
+      </div>
+      <div className="lb-hero__content">
+        <div className="lb-hero__top">
+          <div>
+            <h1 id="lb-page-title" className="lb-hero__title">
+              Leaderboard
+            </h1>
+            <p className="lb-hero__subtitle">
+              League stats come from your league roster. New players start at 6.0 until they play a match.
+            </p>
+          </div>
+          {leagueName ? (
+            <span className="lb-hero__league-chip">
+              <LeaderboardIcon name="shield" />
+              <span>{leagueName}</span>
+            </span>
+          ) : null}
+        </div>
+        {contextNote ? <p className="lb-hero__note">{contextNote}</p> : null}
+      </div>
+    </section>
+  )
+}
+
+function SummaryCards({ summary }) {
+  const cards = [
+    { id: 'players', label: 'Players', value: summary.playerCount, sub: 'Total Players', icon: 'users' },
+    { id: 'matches', label: 'Matches Played', value: summary.matchCount, sub: 'Total Matches', icon: 'calendar' },
+    { id: 'rating', label: 'Avg Rating', value: summary.avgRating, sub: 'League Average', icon: 'star' },
+    { id: 'mvp', label: 'MVP Awarded', value: summary.mvpTotal, sub: 'Total MVPs', icon: 'trophy' },
+  ]
 
   return (
-    <div className="leaderboard-table-wrap" role="tabpanel">
-      <table className="leaderboard-table leaderboard-table--full">
-        <thead>
-          <tr>
-            <th scope="col" className="leaderboard-table__rank">
-              #
-            </th>
-            <th scope="col" className="leaderboard-table__name">
-              Player
-            </th>
-            <th scope="col" className="leaderboard-table__stat">
-              Rating
-            </th>
-            <th scope="col" className="leaderboard-table__stat">
-              MP
-            </th>
-            <th scope="col" className="leaderboard-table__stat">
-              G
-            </th>
-            <th scope="col" className="leaderboard-table__stat">
-              W-L
-            </th>
-            <th scope="col" className="leaderboard-table__stat">
-              MVP
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((player, index) => (
-            <tr key={player.id}>
-              <td className="leaderboard-table__rank">{index + 1}</td>
-              <td className="leaderboard-table__name">
-                <Link to={`/players/${player.id}`} className="leaderboard-name-link">
-                  <span className="avatar leaderboard-name-link__avatar">{player.initials}</span>
-                  <span className="leaderboard-name-link__text">{player.name}</span>
-                </Link>
-              </td>
-              <td
-                className={`leaderboard-table__stat${sortKey === 'rating' ? ' leaderboard-table__stat--active' : ''}`}
-              >
-                <span className="leaderboard-stat-value">{formatRating(player.rating)}</span>
-              </td>
-              <td
-                className={`leaderboard-table__stat${sortKey === 'matches' ? ' leaderboard-table__stat--active' : ''}`}
-              >
-                <span className="leaderboard-stat-value">{player.matchesPlayed}</span>
-              </td>
-              <td
-                className={`leaderboard-table__stat${sortKey === 'goals' ? ' leaderboard-table__stat--active' : ''}`}
-              >
-                <span className="leaderboard-stat-value">{player.goals}</span>
-              </td>
-              <td className="leaderboard-table__stat">
-                <span className="leaderboard-stat-value">
-                  {player.wins}-{player.losses}
-                </span>
-              </td>
-              <td
-                className={`leaderboard-table__stat${sortKey === 'mvp' ? ' leaderboard-table__stat--active' : ''}`}
-              >
-                <span className="leaderboard-stat-value">{player.mvp}</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="meta leaderboard-sort-hint">{config.hint}</p>
+    <div className="lb-summary-grid">
+      {cards.map((card) => (
+        <article key={card.id} className="lb-summary-card">
+          <span className="lb-summary-card__icon">
+            <LeaderboardIcon name={card.icon} />
+          </span>
+          <p className="lb-summary-card__label">{card.label}</p>
+          <p className="lb-summary-card__value">{card.value}</p>
+          <p className="lb-summary-card__sub">{card.sub}</p>
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function LeaderboardPillTabs({ tabs, activeTab, onChange }) {
+  return (
+    <div className="lb-toolbar">
+      <div className="lb-pill-tabs" role="tablist" aria-label="Leaderboard sort">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            className={`lb-pill-tab${activeTab === tab.id ? ' is-active' : ''}`}
+            onClick={() => onChange(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <span className="lb-filter-chip">All Players</span>
+    </div>
+  )
+}
+
+function LeaderboardRow({ player, rank, sortKey, isTop }) {
+  const columnOrder = DESKTOP_COLUMN_ORDER[sortKey] ?? DESKTOP_COLUMN_ORDER.rating
+  const featured = featuredStatFor(player, sortKey)
+  const ratingIsSecondary = sortKey !== 'rating'
+  const statClass = (key) => (sortKey === key ? ' lb-stat--active' : '')
+
+  const compactParts = []
+  if (ratingIsSecondary) {
+    compactParts.push(
+      <span key="rtg" className="is-secondary">
+        RTG {formatRating(player.rating)}
+      </span>,
+    )
+  }
+  if (sortKey !== 'matches') {
+    if (compactParts.length) compactParts.push(<span key="d1" className="lb-row__stats-dot" aria-hidden="true">•</span>)
+    compactParts.push(<span key="mp">MP {player.matchesPlayed}</span>)
+  }
+  if (sortKey !== 'goals') {
+    if (compactParts.length) compactParts.push(<span key="d2" className="lb-row__stats-dot" aria-hidden="true">•</span>)
+    compactParts.push(<span key="g">G {player.goals}</span>)
+  }
+  if (compactParts.length) compactParts.push(<span key="d3" className="lb-row__stats-dot" aria-hidden="true">•</span>)
+  compactParts.push(
+    <span key="wl">
+      W-L {player.wins}-{player.losses}
+    </span>,
+  )
+  if (sortKey !== 'mvp') {
+    compactParts.push(<span key="d4" className="lb-row__stats-dot" aria-hidden="true">•</span>)
+    compactParts.push(<span key="mvp">MVP {player.mvp}</span>)
+  }
+
+  return (
+    <li className={`lb-row${isTop ? ' lb-row--top' : ''}`} data-sort={sortKey}>
+      <div className="lb-row__rank" style={{ order: 1 }}>
+        {isTop ? (
+          <span className="lb-row__crown" aria-hidden="true">
+            <LeaderboardIcon name="crown" />
+          </span>
+        ) : null}
+        <span className="lb-row__rank-num">{rank}</span>
+      </div>
+
+      <Link to={`/players/${player.id}`} className="lb-row__player" style={{ order: 2 }}>
+        <span className="avatar lb-row__avatar">{player.initials}</span>
+        <span className="lb-row__name">{player.name}</span>
+      </Link>
+
+      <div className="lb-row__featured" aria-label={`${featured.label} ${featured.value}`}>
+        <span className="lb-row__featured-label">{featured.label}</span>
+        <span className="lb-row__featured-value">{featured.value}</span>
+      </div>
+
+      <div
+        className={`lb-row__rating${ratingIsSecondary ? ' is-secondary' : ' is-active'}`}
+        style={{ order: columnOrder.rating }}
+      >
+        <span className="lb-row__rating-label">Rating</span>
+        <span className="lb-row__rating-value">{formatRating(player.rating)}</span>
+      </div>
+
+      <div
+        className={`lb-row__stat lb-row__stat--mp${statClass('matches')}`}
+        style={{ order: columnOrder.matches }}
+      >
+        <span className="lb-row__stat-label">MP</span>
+        <span className="lb-row__stat-value">{player.matchesPlayed}</span>
+      </div>
+      <div
+        className={`lb-row__stat lb-row__stat--g${statClass('goals')}`}
+        style={{ order: columnOrder.goals }}
+      >
+        <span className="lb-row__stat-label">G</span>
+        <span className="lb-row__stat-value">{player.goals}</span>
+      </div>
+      <div className="lb-row__stat lb-row__stat--wl" style={{ order: columnOrder.wl }}>
+        <span className="lb-row__stat-label">W-L</span>
+        <span className="lb-row__stat-value">
+          {player.wins}-{player.losses}
+        </span>
+      </div>
+      <div
+        className={`lb-row__stat lb-row__stat--mvp${statClass('mvp')}`}
+        style={{ order: columnOrder.mvp }}
+      >
+        <span className="lb-row__stat-label">MVP</span>
+        <span className="lb-row__stat-value">{player.mvp}</span>
+      </div>
+
+      <p
+        className="lb-row__stats-compact"
+        aria-label={`${formatRating(player.rating)} rating, ${player.matchesPlayed} matches, ${player.goals} goals, ${player.wins}-${player.losses} record, ${player.mvp} MVPs`}
+      >
+        {compactParts}
+      </p>
+    </li>
+  )
+}
+
+function LeaderboardList({ players, sortKey }) {
+  const rows = useMemo(() => rankPlayers(players, sortKey), [players, sortKey])
+  const columnOrder = DESKTOP_COLUMN_ORDER[sortKey] ?? DESKTOP_COLUMN_ORDER.rating
+
+  return (
+    <div className={`lb-panel lb-panel--sort-${sortKey}`} role="tabpanel">
+      <div className="lb-panel__head" aria-hidden="true">
+        <span style={{ order: 1 }}>#</span>
+        <span style={{ order: 2 }}>Player</span>
+        <span className={sortKey === 'rating' ? 'is-active' : ''} style={{ order: columnOrder.rating }}>
+          Rating
+        </span>
+        <span className={sortKey === 'matches' ? 'is-active' : ''} style={{ order: columnOrder.matches }}>
+          MP
+        </span>
+        <span className={sortKey === 'goals' ? 'is-active' : ''} style={{ order: columnOrder.goals }}>
+          G
+        </span>
+        <span style={{ order: columnOrder.wl }}>W-L</span>
+        <span className={sortKey === 'mvp' ? 'is-active' : ''} style={{ order: columnOrder.mvp }}>
+          MVP
+        </span>
+      </div>
+      <ul className="lb-list">
+        {rows.map((player, index) => (
+          <LeaderboardRow
+            key={player.id}
+            player={player}
+            rank={index + 1}
+            sortKey={sortKey}
+            isTop={index === 0}
+          />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function LeaderboardLoading() {
+  return (
+    <div className="lb-loading" aria-busy="true" aria-live="polite">
+      <div className="lb-summary-grid">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="lb-summary-card lb-summary-card--skeleton" />
+        ))}
+      </div>
+      <div className="card lb-panel-card">
+        <div className="lb-skeleton lb-skeleton--tabs" />
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="lb-skeleton lb-skeleton--row" />
+        ))}
+      </div>
+      <p className="meta lb-loading-note">Loading leaderboard…</p>
     </div>
   )
 }
@@ -169,8 +410,6 @@ function Stats() {
           userId: currentUserId,
         })
         if (cancelled) return
-
-        console.log('[Stats] leaderboard response', payload)
 
         const rawPlayers = payload?.data?.players
         const list = Array.isArray(rawPlayers)
@@ -215,34 +454,48 @@ function Stats() {
     }
   }, [activeLeague?.id, activeLeagueId, currentUserId, refreshLeaguesFromApi])
 
-  const heading = leagueName ? `${leagueName} — Players` : 'Players'
+  const summary = useMemo(() => computeSummary(players), [players])
 
   return (
-    <div className="screen">
-      <PageHeader title="Leaderboard" />
+    <div className="screen lb-page">
+      <LeaderboardHero leagueName={leagueName} contextNote={contextNote} />
 
-      <p className="meta stats-disclaimer">
-        League stats come from your league roster. New players start at 6.0 until they play a match.
-      </p>
+      {isLoading ? (
+        <LeaderboardLoading />
+      ) : (
+        <>
+          <SummaryCards summary={summary} />
 
-      <section className="card stats-leaderboard-card">
-        <p className="session-title stats-league-heading">{heading}</p>
-        {contextNote ? <p className="meta stats-leaderboard-note">{contextNote}</p> : null}
+          <section className="card lb-panel-card">
+            <LeaderboardPillTabs tabs={LEADERBOARD_TABS} activeTab={activeTab} onChange={setActiveTab} />
 
-        <Tabs tabs={LEADERBOARD_TABS} activeTab={activeTab} onChange={setActiveTab} />
+            {error ? (
+              <p className="lb-empty lb-empty--error" role="alert">
+                {error}
+              </p>
+            ) : players.length === 0 ? (
+              <div className="lb-empty">
+                <span className="lb-empty__icon">
+                  <LeaderboardIcon name="users" />
+                </span>
+                <p className="lb-empty__title">No players yet</p>
+                <p className="meta">Join a league or add players to your roster to see the leaderboard.</p>
+              </div>
+            ) : (
+              LEADERBOARD_TABS.map((tab) =>
+                activeTab === tab.id ? <LeaderboardList key={tab.id} players={players} sortKey={tab.id} /> : null,
+              )
+            )}
+          </section>
 
-        {isLoading ? (
-          <p className="meta">Loading...</p>
-        ) : error ? (
-          <p className="meta">{error}</p>
-        ) : players.length === 0 ? (
-          <p className="meta">No players found.</p>
-        ) : (
-          LEADERBOARD_TABS.map((tab) =>
-            activeTab === tab.id ? <LeaderboardTable key={tab.id} players={players} sortKey={tab.id} /> : null,
-          )
-        )}
-      </section>
+          <p className="lb-footer-note">
+            <span className="lb-footer-note__icon" aria-hidden="true">
+              <LeaderboardIcon name="info" />
+            </span>
+            New players start at 6.0 until they play a match.
+          </p>
+        </>
+      )}
     </div>
   )
 }
