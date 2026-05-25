@@ -1,8 +1,11 @@
 const { query } = require('../db/pool')
+const {
+  LM_STYLE_COLUMNS_SQL,
+  buildStyleResponseFromMemberRow,
+} = require('../constants/playStyles')
 
-async function fetchLeagueMemberSummary(playerId, leagueId) {
-  const rows = await query(
-    `SELECT u.id,
+const MEMBER_SELECT = `
+            u.id,
             u.username,
             u.display_name,
             u.avatar_image,
@@ -15,7 +18,12 @@ async function fetchLeagueMemberSummary(playerId, leagueId) {
             lm.wins,
             lm.losses,
             lm.mvp_count,
-            COALESCE(pp.main_archetype, 'None') AS main_archetype
+            ${LM_STYLE_COLUMNS_SQL},
+            COALESCE(pp.main_archetype, 'None') AS main_archetype`
+
+async function fetchLeagueMemberSummary(playerId, leagueId) {
+  const rows = await query(
+    `SELECT ${MEMBER_SELECT}
      FROM league_members lm
      INNER JOIN users u ON u.id = lm.user_id
      LEFT JOIN player_profiles pp ON pp.user_id = u.id
@@ -28,20 +36,7 @@ async function fetchLeagueMemberSummary(playerId, leagueId) {
 
 async function fetchPrimaryLeagueMemberSummary(playerId) {
   const rows = await query(
-    `SELECT u.id,
-            u.username,
-            u.display_name,
-            u.avatar_image,
-            lm.league_id,
-            lm.rating,
-            lm.player_worth,
-            lm.ovr,
-            lm.matches_played,
-            lm.goals,
-            lm.wins,
-            lm.losses,
-            lm.mvp_count,
-            COALESCE(pp.main_archetype, 'None') AS main_archetype
+    `SELECT ${MEMBER_SELECT}
      FROM league_members lm
      INNER JOIN users u ON u.id = lm.user_id
      LEFT JOIN player_profiles pp ON pp.user_id = u.id
@@ -70,6 +65,7 @@ function mapSummaryResponse(memberRow, extras = {}) {
   const rating = Number(Number(memberRow.rating).toFixed(1)) || 6.0
   const playerWorth = Number(memberRow.player_worth) || 10
   const ovr = Number(memberRow.ovr) || Math.round(rating * 10)
+  const stylePayload = buildStyleResponseFromMemberRow(memberRow)
 
   return {
     id: memberRow.id,
@@ -82,7 +78,11 @@ function mapSummaryResponse(memberRow, extras = {}) {
     base_value: playerWorth,
     total_worth: playerWorth,
     ovr,
-    main_archetype: memberRow.main_archetype || 'None',
+    main_archetype: stylePayload.main_archetype,
+    archetype_description: stylePayload.archetype_description,
+    style_counters: stylePayload.style_counters,
+    style_radar: stylePayload.style_radar,
+    has_style_data: stylePayload.has_style_data,
     matches_played: Number(memberRow.matches_played) || 0,
     goals: Number(memberRow.goals) || 0,
     wins: Number(memberRow.wins) || 0,

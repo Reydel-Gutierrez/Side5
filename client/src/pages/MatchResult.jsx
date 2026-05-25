@@ -24,7 +24,7 @@ function MatchResult() {
 
   return (
     <div className="screen">
-      <PageHeader title="Match Result" subtitle={`${match.date} · ${match.time}`} />
+      <PageHeader title="Match Result" subtitle={`${match.date} ï¿½ ${match.time}`} />
 
       <section className="card center-card">
         <div className="result-grid">

@@ -92,9 +92,12 @@ function ProfileHeroCard({ profileCardData, player }) {
       </div>
 
       <div className="hero-card-main__stats">
-        <article className="hero-card-main__stat">
+        <article className="hero-card-main__stat hero-card-main__stat--archetype">
           <p className="hero-card-main__stat-label">Main Archetype</p>
           <p className="hero-card-main__stat-value">{profileCardData.archetype}</p>
+          {profileCardData.archetypeDescription ? (
+            <p className="hero-card-main__stat-detail">{profileCardData.archetypeDescription}</p>
+          ) : null}
         </article>
         <article className="hero-card-main__stat">
           <p className="hero-card-main__stat-label">MVP Trophies</p>

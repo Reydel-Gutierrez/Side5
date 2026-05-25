@@ -163,6 +163,18 @@ async function recalculateTeamBudgetUsedConn(conn, teamId) {
   return total
 }
 
+/** Captains must be confirmed session players so draft UI can resolve their names/stats. */
+async function ensureSessionPlayerConfirmedConn(conn, sessionId, userId) {
+  await conn.execute(
+    `INSERT INTO session_players (session_id, user_id, status, confirmed_at)
+     VALUES (?, ?, 'confirmed', NOW())
+     ON DUPLICATE KEY UPDATE
+       status = 'confirmed',
+       confirmed_at = COALESCE(confirmed_at, NOW())`,
+    [sessionId, userId],
+  )
+}
+
 async function syncCaptainMembershipConn(conn, sessionId, teamId, nextCaptainId) {
   const [existingRows] = await conn.execute('SELECT captain_user_id FROM teams WHERE id = ? AND session_id = ? LIMIT 1', [
     teamId,
@@ -174,12 +186,87 @@ async function syncCaptainMembershipConn(conn, sessionId, teamId, nextCaptainId)
     await conn.execute('DELETE FROM team_players WHERE team_id = ? AND user_id = ?', [teamId, prevCaptainId])
   }
   if (nextCaptainId != null) {
+    await ensureSessionPlayerConfirmedConn(conn, sessionId, nextCaptainId)
     await conn.execute(
       `INSERT IGNORE INTO team_players (team_id, user_id, pick_source) VALUES (?, ?, 'captain')`,
       [teamId, nextCaptainId],
     )
   }
   return recalculateTeamBudgetUsedConn(conn, teamId)
+}
+
+async function queryDraftRosterForSession(sessionId) {
+  const roster = await query(
+    `SELECT sp.user_id, sp.status, u.username, u.display_name,
+            ${LM_WORTH_SQL} AS base_value,
+            ${LM_WORTH_SQL} AS player_worth,
+            ${LM_RATING_SQL} AS rating,
+            ${LM_OVR_SQL} AS ovr,
+            u.avatar_image
+     FROM session_players sp
+     INNER JOIN users u ON u.id = sp.user_id
+     ${leagueMemberJoinForSession()}
+     WHERE sp.session_id = ? AND sp.status = 'confirmed'
+     ORDER BY u.display_name ASC, u.username ASC`,
+    [sessionId],
+  )
+
+  const rosterIds = new Set(roster.map((row) => Number(row.user_id)))
+  const captainRows = await query(
+    `SELECT DISTINCT t.captain_user_id AS user_id
+     FROM teams t
+     WHERE t.session_id = ? AND t.captain_user_id IS NOT NULL`,
+    [sessionId],
+  )
+  const missingCaptainIds = [
+    ...new Set(
+      captainRows
+        .map((row) => Number(row.user_id))
+        .filter((id) => Number.isFinite(id) && !rosterIds.has(id)),
+    ),
+  ]
+  if (!missingCaptainIds.length) {
+    return roster
+  }
+
+  const placeholders = missingCaptainIds.map(() => '?').join(', ')
+  let extraRows
+  try {
+    extraRows = await query(
+      `SELECT u.id AS user_id, 'confirmed' AS status, u.username, u.display_name,
+              ${LM_WORTH_SQL} AS base_value,
+              ${LM_WORTH_SQL} AS player_worth,
+              ${LM_RATING_SQL} AS rating,
+              ${LM_OVR_SQL} AS ovr,
+              u.avatar_image
+       FROM users u
+       INNER JOIN sessions s ON s.id = ?
+       LEFT JOIN league_members lm ON lm.league_id = s.league_id AND lm.user_id = u.id AND lm.is_active = TRUE
+       WHERE u.id IN (${placeholders})`,
+      [sessionId, ...missingCaptainIds],
+    )
+  } catch (error) {
+    if (!isMissingAvatarColumn(error)) throw error
+    extraRows = await query(
+      `SELECT u.id AS user_id, 'confirmed' AS status, u.username, u.display_name,
+              ${LM_WORTH_SQL} AS base_value,
+              ${LM_WORTH_SQL} AS player_worth,
+              ${LM_RATING_SQL} AS rating,
+              ${LM_OVR_SQL} AS ovr,
+              '' AS avatar_image
+       FROM users u
+       INNER JOIN sessions s ON s.id = ?
+       LEFT JOIN league_members lm ON lm.league_id = s.league_id AND lm.user_id = u.id AND lm.is_active = TRUE
+       WHERE u.id IN (${placeholders})`,
+      [sessionId, ...missingCaptainIds],
+    )
+  }
+
+  return [...roster, ...extraRows].sort((a, b) => {
+    const aName = String(a.display_name || a.username || '')
+    const bName = String(b.display_name || b.username || '')
+    return aName.localeCompare(bName)
+  })
 }
 
 async function assertActorCanManageLeague(actorId, leagueId) {
@@ -243,34 +330,6 @@ function shuffleInPlace(arr) {
     arr[j] = tmp
   }
   return arr
-}
-
-/** Minimum roster size per team to lock (from session format, e.g. 5v5 → 5). */
-function minPlayersPerTeamFromSessionFormat(formatRaw) {
-  const s = String(formatRaw || '5v5').trim().toLowerCase()
-  const m = s.match(/^(\d+)\s*v\s*(\d+)$/i)
-  if (m) {
-    return Math.max(Number.parseInt(m[1], 10) || 0, Number.parseInt(m[2], 10) || 0) || 5
-  }
-  const single = s.match(/^(\d+)$/)
-  if (single) return Number.parseInt(single[1], 10) || 5
-  return 5
-}
-
-async function countRosterPlayersOnTeamConn(conn, teamId, captainUserId) {
-  const [rows] = await conn.execute(
-    `SELECT COUNT(DISTINCT tp.user_id) AS c FROM team_players tp WHERE tp.team_id = ?`,
-    [teamId],
-  )
-  let c = Number(rows?.[0]?.c) || 0
-  if (captainUserId != null) {
-    const [capRows] = await conn.execute(
-      'SELECT 1 FROM team_players WHERE team_id = ? AND user_id = ? LIMIT 1',
-      [teamId, captainUserId],
-    )
-    if (!capRows.length) c += 1
-  }
-  return c
 }
 
 async function maybeRunBenchShuffleAllTeamsLockedConn(conn, sessionId) {
@@ -504,11 +563,26 @@ router.post('/:id/teams', async (req, res) => {
       trimmedName.slice(0, 50),
       captainId,
     ])
+    const newTeamId = result.insertId
+
+    if (captainId != null) {
+      const conn = await pool.getConnection()
+      try {
+        await conn.beginTransaction()
+        await syncCaptainMembershipConn(conn, sessionId, newTeamId, captainId)
+        await conn.commit()
+      } catch (innerErr) {
+        await conn.rollback()
+        throw innerErr
+      } finally {
+        conn.release()
+      }
+    }
 
     return res.status(201).json({
       message: 'Team created',
       data: {
-        id: result.insertId,
+        id: newTeamId,
         session_id: sessionId,
         name: trimmedName.slice(0, 50),
         captain_user_id: captainId,
@@ -629,20 +703,7 @@ router.get('/:id/draft', async (req, res) => {
       [sessionId],
     )
 
-    const roster = await query(
-      `SELECT sp.user_id, sp.status, u.username, u.display_name,
-              ${LM_WORTH_SQL} AS base_value,
-              ${LM_WORTH_SQL} AS player_worth,
-              ${LM_RATING_SQL} AS rating,
-              ${LM_OVR_SQL} AS ovr,
-              u.avatar_image
-       FROM session_players sp
-       INNER JOIN users u ON u.id = sp.user_id
-       ${leagueMemberJoinForSession()}
-       WHERE sp.session_id = ? AND sp.status = 'confirmed'
-       ORDER BY u.display_name ASC, u.username ASC`,
-      [sessionId],
-    )
+    const roster = await queryDraftRosterForSession(sessionId)
 
     const teamPlayers = await query(
       `SELECT tp.team_id, tp.user_id, COALESCE(tp.pick_source, 'captain') AS pick_source
@@ -665,8 +726,6 @@ router.get('/:id/draft', async (req, res) => {
       .filter((tp) => String(tp.pick_source || 'captain') === 'bench_shuffle')
       .map((tp) => ({ teamId: Number(tp.team_id), userId: Number(tp.user_id) }))
 
-    const minPlayersPerTeamToLock = minPlayersPerTeamFromSessionFormat(sessions[0]?.format)
-
     return res.json({
       data: {
         session: sessions[0],
@@ -675,7 +734,6 @@ router.get('/:id/draft', async (req, res) => {
         teamPlayers,
         benchShuffleAssignments,
         unassignedBenchCount,
-        minPlayersPerTeamToLock,
       },
     })
   } catch (error) {
@@ -882,18 +940,7 @@ router.post('/:id/teams/:teamId/lock', async (req, res) => {
     let shuffleResult = { ran: false }
     try {
       await conn.beginTransaction()
-      const [[sessRow]] = await conn.execute(
-        'SELECT format FROM sessions WHERE id = ? FOR UPDATE',
-        [sessionId],
-      )
-      const minNeed = minPlayersPerTeamFromSessionFormat(sessRow?.format)
-      const rosterCount = await countRosterPlayersOnTeamConn(conn, teamId, team.captain_user_id)
-      if (rosterCount < minNeed) {
-        await conn.rollback()
-        return res.status(400).json({
-          error: `You need at least ${minNeed} players on this team (including captain) before locking.`,
-        })
-      }
+      await conn.execute('SELECT id FROM sessions WHERE id = ? FOR UPDATE', [sessionId])
       await conn.execute('UPDATE teams SET is_locked = 1 WHERE id = ? AND session_id = ?', [teamId, sessionId])
       shuffleResult = await maybeRunBenchShuffleAllTeamsLockedConn(conn, sessionId)
       await conn.commit()
@@ -1043,12 +1090,28 @@ router.patch('/:id/teams/:teamId', async (req, res) => {
       sets.push('captain_user_id = ?')
       vals.push(captainId)
     }
-    vals.push(teamId, sessionId)
-    await query(`UPDATE teams SET ${sets.join(', ')} WHERE id = ? AND session_id = ?`, vals)
+    const conn = await pool.getConnection()
+    let budgetUsed
+    try {
+      await conn.beginTransaction()
+      if (sets.length) {
+        vals.push(teamId, sessionId)
+        await conn.execute(`UPDATE teams SET ${sets.join(', ')} WHERE id = ? AND session_id = ?`, vals)
+      }
+      if (hasCaptain) {
+        budgetUsed = await syncCaptainMembershipConn(conn, sessionId, teamId, captainId)
+      }
+      await conn.commit()
+    } catch (innerErr) {
+      await conn.rollback()
+      throw innerErr
+    } finally {
+      conn.release()
+    }
 
     return res.json({
       message: 'Team updated',
-      data: { sessionId, teamId },
+      data: { sessionId, teamId, ...(hasCaptain ? { captainUserId: captainId, budgetUsed } : {}) },
     })
   } catch (error) {
     return handleSqlError(res, error)

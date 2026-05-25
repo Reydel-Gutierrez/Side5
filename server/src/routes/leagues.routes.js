@@ -1,6 +1,10 @@
 const express = require('express')
 const { query, pool } = require('../db/pool')
 const { fetchLeagueLeaderboard } = require('../queries/leaderboard')
+const {
+  LM_STYLE_COLUMNS_SQL,
+  buildStyleResponseFromMemberRow,
+} = require('../constants/playStyles')
 
 const router = express.Router()
 
@@ -204,6 +208,7 @@ router.get('/:id/members', async (req, res) => {
               lm.matches_played,
               lm.wins,
               lm.losses,
+              ${LM_STYLE_COLUMNS_SQL},
               EXISTS (
                 SELECT 1
                 FROM teams t
@@ -219,7 +224,18 @@ router.get('/:id/members', async (req, res) => {
       [leagueId]
     )
 
-    return res.json({ data: members, count: members.length, league_name: leagues[0].name })
+    const data = members.map((row) => {
+      const style = buildStyleResponseFromMemberRow(row)
+      return {
+        ...row,
+        main_archetype: style.main_archetype,
+        archetype_description: style.archetype_description,
+        style_counters: style.style_counters,
+        style_radar: style.style_radar,
+        has_style_data: style.has_style_data,
+      }
+    })
+    return res.json({ data, count: data.length, league_name: leagues[0].name })
   } catch (error) {
     return handleSqlError(res, error)
   }

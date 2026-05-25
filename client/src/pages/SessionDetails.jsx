@@ -335,7 +335,40 @@ function SessionDetails() {
     );
   }
 
-  if (!session) return <Navigate to="/sessions" replace />;
+  if (!session) {
+    return (
+      <div className="screen screen--session-detail">
+        <section className="card session-detail-info">
+          <h1 className="page-title">Session</h1>
+          <p className="meta session-detail-info__error">
+            {error || "Could not load this session."}
+          </p>
+          <SecondaryButton
+            type="button"
+            className="w-full"
+            onClick={() => {
+              setIsLoading(true);
+              setError("");
+              reloadSession()
+                .catch((e) =>
+                  setError(e?.message || "Failed to load session."),
+                )
+                .finally(() => setIsLoading(false));
+            }}
+          >
+            Try again
+          </SecondaryButton>
+          <Link
+            to="/sessions"
+            className="session-detail-cta-link"
+            style={{ display: "block", marginTop: "0.75rem" }}
+          >
+            <SecondaryButton className="w-full">Back to sessions</SecondaryButton>
+          </Link>
+        </section>
+      </div>
+    );
+  }
 
   if (isPastSession(session)) {
     return <Navigate to={`/game-hub/${sessionId}`} replace />;

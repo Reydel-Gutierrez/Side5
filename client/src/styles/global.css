@@ -5333,6 +5333,64 @@ a.league-card-actions__item {
   color: #ffd8c1;
 }
 
+.game-hub-style-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.game-hub-style-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(242, 231, 210, 0.72);
+}
+
+.game-hub-style-hint {
+  margin: 4px 0 8px;
+}
+
+.game-hub-style-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.game-hub-style-pick {
+  border: 1px solid rgba(242, 231, 210, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--cream);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 6px 11px;
+  cursor: pointer;
+}
+
+.game-hub-style-pick.is-active {
+  border-color: rgba(120, 180, 255, 0.5);
+  background: rgba(90, 140, 220, 0.2);
+  color: #d6e8ff;
+}
+
+.game-hub-style-pick:disabled:not(.is-active) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hero-card-main__stat-detail {
+  margin: 4px 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: rgba(242, 231, 210, 0.72);
+}
+
+.player-radar-empty {
+  margin: 0 0 10px;
+  padding: 0 4px;
+}
+
 .game-hub-mvp__head {
   display: grid;
   grid-template-columns: auto 1fr;

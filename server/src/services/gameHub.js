@@ -5,6 +5,15 @@ const {
   LM_OVR_SQL,
   leagueMemberJoinForTeamSession,
 } = require('../queries/leagueMemberStats')
+const {
+  PLAY_STYLES,
+  PLAY_STYLE_KEYS,
+  KEY_TO_COLUMN,
+  LABEL_BY_KEY,
+  validateStyleSelections,
+  computeMainArchetype,
+  extractStyleCountersFromMemberRow,
+} = require('../constants/playStyles')
 
 let ensuredGameHubSchema = false
 
@@ -132,6 +141,28 @@ async function ensureGameHubSchema() {
   await addColumnIfMissing('sessions', 'stats_finalized', 'BOOLEAN NOT NULL DEFAULT FALSE')
   await addColumnIfMissing('sessions', 'stats_finalized_at', 'DATETIME NULL')
   await addColumnIfMissing('sessions', 'stats_finalized_by', 'INT NULL')
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS player_style_votes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      league_id INT NOT NULL,
+      session_id INT NOT NULL,
+      reviewed_user_id INT NOT NULL,
+      reviewer_user_id INT NOT NULL,
+      submission_id INT NULL,
+      style_key VARCHAR(32) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_style_vote_session (session_id, reviewer_user_id, reviewed_user_id, style_key),
+      FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY (reviewed_user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (reviewer_user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (submission_id) REFERENCES player_stat_submissions(id) ON DELETE CASCADE
+    )
+  `)
+  for (const style of PLAY_STYLES) {
+    await addColumnIfMissing('league_members', style.column, 'INT NOT NULL DEFAULT 0')
+  }
 
   ensuredGameHubSchema = true
 }
@@ -262,7 +293,30 @@ async function assignReviewersConn(conn, submissionId, sessionId, submitterUserI
   return reviewers
 }
 
+async function deleteStyleVotesForSubmissionConn(conn, submissionId) {
+  try {
+    await conn.execute('DELETE FROM player_style_votes WHERE submission_id = ?', [submissionId])
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error
+  }
+}
+
+async function insertStyleVotesConn(
+  conn,
+  { leagueId, sessionId, reviewedUserId, reviewerUserId, submissionId, styles },
+) {
+  for (const styleKey of styles) {
+    await conn.execute(
+      `INSERT INTO player_style_votes
+       (league_id, session_id, reviewed_user_id, reviewer_user_id, submission_id, style_key)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [leagueId, sessionId, reviewedUserId, reviewerUserId, submissionId, styleKey],
+    )
+  }
+}
+
 async function resetReviewsConn(conn, submissionId, sessionId, submitterUserId) {
+  await deleteStyleVotesForSubmissionConn(conn, submissionId)
   await conn.execute('DELETE FROM player_stat_reviews WHERE submission_id = ?', [submissionId])
   await conn.execute(
     `UPDATE player_stat_submissions SET approved_rating = NULL, applied_to_league_members = FALSE WHERE id = ?`,
@@ -365,6 +419,24 @@ async function getReviewAssignments(sessionId, reviewerUserId) {
 
   const finalized = await isSessionStatsFinalized(sessionId)
 
+  let styleVotesByTarget = {}
+  try {
+    const styleRows = await query(
+      `SELECT reviewed_user_id, style_key
+       FROM player_style_votes
+       WHERE session_id = ? AND reviewer_user_id = ?`,
+      [sessionId, reviewerUserId],
+    )
+    styleVotesByTarget = styleRows.reduce((acc, vote) => {
+      const key = String(vote.reviewed_user_id)
+      if (!acc[key]) acc[key] = []
+      acc[key].push(vote.style_key)
+      return acc
+    }, {})
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error
+  }
+
   return rows.map((row) => {
     const hasSubmitted = row.submission_id != null
     const submissionPending = String(row.submission_status || '') === 'pending'
@@ -391,6 +463,10 @@ async function getReviewAssignments(sessionId, reviewerUserId) {
         submissionPending &&
         row.review_id != null &&
         reviewPending,
+      style_selections: (styleVotesByTarget[String(row.target_user_id)] || []).map((key) => ({
+        key,
+        label: LABEL_BY_KEY[key] || key,
+      })),
     }
   })
 }
@@ -427,6 +503,68 @@ async function fetchSubmissionWithReviews(submissionId) {
     })),
     decline_note: declineNotes[0] || null,
   }
+}
+
+async function updatePlayerArchetypeConn(conn, userId, leagueId) {
+  const [memberRows] = await conn.execute(
+    `SELECT ${PLAY_STYLES.map((s) => s.column).join(', ')}
+     FROM league_members
+     WHERE league_id = ? AND user_id = ? AND is_active = TRUE
+     LIMIT 1`,
+    [leagueId, userId],
+  )
+  if (!memberRows.length) return
+  const counters = extractStyleCountersFromMemberRow(memberRows[0])
+  const { id: archetypeId } = computeMainArchetype(counters)
+  await conn.execute(
+    `INSERT INTO player_profiles (user_id, main_archetype)
+     VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE main_archetype = VALUES(main_archetype), updated_at = NOW()`,
+    [userId, archetypeId],
+  )
+}
+
+async function applyStyleVotesForSubmissionConn(conn, submissionId, leagueId, reviewedUserId) {
+  const [voteRows] = await conn.execute(
+    `SELECT psv.style_key
+     FROM player_style_votes psv
+     INNER JOIN player_stat_reviews psr
+       ON psr.submission_id = psv.submission_id
+      AND psr.reviewer_user_id = psv.reviewer_user_id
+      AND psr.decision = 'accepted'
+     WHERE psv.submission_id = ?`,
+    [submissionId],
+  )
+  const votes = Array.isArray(voteRows) ? voteRows : []
+  if (!votes.length) {
+    await updatePlayerArchetypeConn(conn, reviewedUserId, leagueId)
+    return
+  }
+
+  const increments = {}
+  for (const row of votes) {
+    const key = String(row.style_key || '').toLowerCase()
+    const column = KEY_TO_COLUMN[key]
+    if (!column) continue
+    increments[column] = (increments[column] || 0) + 1
+  }
+
+  const setParts = []
+  const params = []
+  for (const [column, inc] of Object.entries(increments)) {
+    setParts.push(`\`${column}\` = \`${column}\` + ?`)
+    params.push(inc)
+  }
+  if (setParts.length) {
+    params.push(leagueId, reviewedUserId)
+    await conn.execute(
+      `UPDATE league_members
+       SET ${setParts.join(', ')}, updated_at = NOW()
+       WHERE league_id = ? AND user_id = ? AND is_active = TRUE`,
+      params,
+    )
+  }
+  await updatePlayerArchetypeConn(conn, reviewedUserId, leagueId)
 }
 
 async function applySubmissionToLeagueMemberConn(conn, leagueId, userId, goals, result, matchRating) {
@@ -744,6 +882,7 @@ async function getGameHubPayload(sessionId, userId) {
         label,
         value: RATING_OPTIONS[label],
       })),
+      playStyleOptions: PLAY_STYLES.map((s) => ({ key: s.key, label: s.label })),
     },
   }
 }
@@ -830,7 +969,11 @@ async function createOrResubmitStats(sessionId, userId, { goals, result, note })
   }
 }
 
-async function submitReview(submissionId, reviewerUserId, { decision, declineNote, ratingLabel, ratingValue }) {
+async function submitReview(
+  submissionId,
+  reviewerUserId,
+  { decision, declineNote, ratingLabel, ratingValue, styleSelections },
+) {
   await ensureGameHubSchema()
 
   if (decision !== 'accepted' && decision !== 'declined') {
@@ -838,6 +981,12 @@ async function submitReview(submissionId, reviewerUserId, { decision, declineNot
   }
   if (decision === 'declined' && !String(declineNote || '').trim()) {
     return { error: 'decline_note is required when declining', status: 400 }
+  }
+  const styleValidation = validateStyleSelections(styleSelections, {
+    required: decision === 'accepted',
+  })
+  if (!styleValidation.ok) {
+    return { error: styleValidation.error, status: 400 }
   }
   if (decision === 'accepted') {
     if (!isValidRatingChoice(ratingLabel, ratingValue)) {
@@ -849,7 +998,7 @@ async function submitReview(submissionId, reviewerUserId, { decision, declineNot
   }
 
   const subs = await query(
-    'SELECT id, session_id, user_id, status FROM player_stat_submissions WHERE id = ? LIMIT 1',
+    'SELECT id, session_id, league_id, user_id, status FROM player_stat_submissions WHERE id = ? LIMIT 1',
     [submissionId],
   )
   if (!subs.length) {
@@ -883,6 +1032,11 @@ async function submitReview(submissionId, reviewerUserId, { decision, declineNot
   try {
     await conn.beginTransaction()
     await conn.execute(
+      `DELETE FROM player_style_votes
+       WHERE submission_id = ? AND reviewer_user_id = ?`,
+      [submissionId, reviewerUserId],
+    )
+    await conn.execute(
       `UPDATE player_stat_reviews
        SET decision = ?, decline_note = ?, rating_label = ?, rating_value = ?, updated_at = NOW()
        WHERE id = ?`,
@@ -894,6 +1048,16 @@ async function submitReview(submissionId, reviewerUserId, { decision, declineNot
         reviews[0].id,
       ],
     )
+    if (decision === 'accepted' && styleValidation.styles.length) {
+      await insertStyleVotesConn(conn, {
+        leagueId: subs[0].league_id,
+        sessionId: subs[0].session_id,
+        reviewedUserId: subs[0].user_id,
+        reviewerUserId,
+        submissionId,
+        styles: styleValidation.styles,
+      })
+    }
     const outcome = await processReviewsAfterDecisionConn(conn, submissionId)
     await conn.commit()
 
@@ -922,9 +1086,6 @@ async function submitMvpVote(sessionId, voterUserId, votedUserId) {
   const playerIds = await getSessionTeamPlayerIds(sessionId)
   if (!playerIds.includes(Number(votedUserId))) {
     return { error: 'You can only vote for a player in this session', status: 400 }
-  }
-  if (Number(votedUserId) === Number(voterUserId)) {
-    return { error: 'You cannot vote for yourself', status: 400 }
   }
 
   const session = await getSessionRow(sessionId)
@@ -1258,6 +1419,7 @@ async function finalizeSessionStats(sessionId, managerUserId, { submissions, pla
         sub.result,
         matchRating,
       )
+      await applyStyleVotesForSubmissionConn(conn, sub.id, sub.league_id, sub.user_id)
 
       await conn.execute(
         `UPDATE player_stat_submissions
@@ -1325,4 +1487,5 @@ module.exports = {
   isMissingTableError,
   RATING_OPTIONS,
   RATING_LABELS,
+  PLAY_STYLE_KEYS,
 }

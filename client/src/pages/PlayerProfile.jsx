@@ -3,6 +3,7 @@ import { Navigate, useSearchParams, useParams } from 'react-router-dom'
 import ProfilePlayerLayout from '../components/ProfilePlayerLayout'
 import { useMockApp } from '../context/MockAppContext'
 import { useDbPlayerSummary } from '../hooks/useDbPlayerSummary'
+import { radarDataFromSummary } from '../constants/playStyles'
 
 function PlayerProfile() {
   const { playerId } = useParams()
@@ -83,9 +84,12 @@ function PlayerProfile() {
   if (!player) return <Navigate to={backTo} replace />
 
   const identity = getPlayerIdentity(player.id, activeLeague?.id ?? null)
-  const radarData = getPlayerAttributeProfile(player.id, activeLeague?.id ?? null)
+  const radarData = dbSummary
+    ? radarDataFromSummary(dbSummary)
+    : getPlayerAttributeProfile(player.id, activeLeague?.id ?? null)
   const heroOverall = Number(dbSummary?.ovr) || player.overall
   const heroArchetype = dbSummary?.main_archetype || (identity.hasVotes ? identity.mainArchetype : 'None')
+  const heroArchetypeDescription = dbSummary?.archetype_description || null
   const heroWorth = Number(dbSummary?.player_worth ?? dbSummary?.total_worth ?? player.value ?? 10)
   const heroMvps = Number(dbSummary?.mvp_trophies ?? player.mvps ?? 0)
   const heroMatches = Number(dbSummary?.matches_played ?? player.games ?? 0)
@@ -116,6 +120,7 @@ function PlayerProfile() {
               overall: heroOverall,
               totalWorth: heroWorth.toFixed(1),
               archetype: heroArchetype,
+              archetypeDescription: heroArchetypeDescription,
               mvpTrophies: heroMvps,
               matchesPlayed: heroMatches,
               avatarImage: heroAvatarImage,

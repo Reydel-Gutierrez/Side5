@@ -18,6 +18,8 @@ router.post('/:submissionId/reviews', async (req, res) => {
     rating_value: ratingValueSnake,
     ratingLabel: ratingLabelCamel,
     ratingValue: ratingValueCamel,
+    style_selections: styleSelectionsSnake,
+    styleSelections: styleSelectionsCamel,
   } = req.body
 
   if (Number.isNaN(submissionId)) {
@@ -33,6 +35,7 @@ router.post('/:submissionId/reviews', async (req, res) => {
       declineNote: declineNote ?? declineNoteCamel,
       ratingLabel: ratingLabelSnake ?? ratingLabelCamel,
       ratingValue: ratingValueSnake ?? ratingValueCamel,
+      styleSelections: styleSelectionsSnake ?? styleSelectionsCamel,
     })
     if (outcome.error) {
       return res.status(outcome.status || 400).json({ error: outcome.error })

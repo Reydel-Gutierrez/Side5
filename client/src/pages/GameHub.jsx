@@ -244,10 +244,7 @@ function GameHub() {
   const sessionPlayers = useMemo(() => flattenSessionPlayers(teams), [teams])
   const mvpVote = hub?.mvpVote
   const mvpHasVoted = Boolean(mvpVote?.hasVoted)
-  const mvpEligiblePlayers = useMemo(
-    () => sessionPlayers.filter((p) => Number(p.user_id) !== actorId),
-    [sessionPlayers, actorId],
-  )
+  const mvpEligiblePlayers = useMemo(() => sessionPlayers, [sessionPlayers])
 
   const reviewAssignments = Array.isArray(hub?.reviewAssignments) ? hub.reviewAssignments : []
 
@@ -293,7 +290,7 @@ function GameHub() {
     }
   }
 
-  const handleReview = async (assignment, decision, declineNote, rating) => {
+  const handleReview = async (assignment, decision, declineNote, rating, styleKeys) => {
     if (Number.isNaN(actorId) || !assignment?.submission_id) return
     setBusy(true)
     setError('')
@@ -306,6 +303,7 @@ function GameHub() {
           decline_note: decision === 'declined' ? declineNote : undefined,
           rating_label: decision === 'accepted' ? rating?.label : undefined,
           rating_value: decision === 'accepted' ? rating?.value : undefined,
+          style_selections: decision === 'accepted' ? styleKeys : [],
         }),
       })
       setActiveReview(null)
@@ -934,6 +932,7 @@ function GameHub() {
         busy={busy}
         readOnly={reviewModalMode === 'view' || statsFinalized}
         ratingOptions={ratingOptions}
+        playStyleOptions={hub?.playStyleOptions}
         onClose={() => setActiveReview(null)}
         onSubmitReview={handleReview}
       />

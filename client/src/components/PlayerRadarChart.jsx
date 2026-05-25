@@ -3,11 +3,15 @@ import { PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, Responsi
 const tickStyle = { fill: '#f2e7d2', fontSize: 11, fontWeight: 600 }
 
 function PlayerRadarChart({ data = [] }) {
+  const hasStyleData = data.some((point) => Number(point.value) > 0)
 
   return (
     <section className="card player-radar-card">
-      <p className="player-radar-kicker">LAST 20 GAMES</p>
+      <p className="player-radar-kicker">LEAGUE REVIEWS</p>
       <h3 className="player-radar-heading">PLAYER STYLE</h3>
+      {!hasStyleData ? (
+        <p className="meta player-radar-empty">No play style votes yet. Styles appear after accepted match reviews.</p>
+      ) : null}
       <div className="player-radar-chart-wrap">
         <ResponsiveContainer width="100%" height={280}>
           <RadarChart

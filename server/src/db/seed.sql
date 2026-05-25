@@ -1,29 +1,50 @@
--- Testing-only seed data. password_hash is plain text "1234" for now.
+-- Testing-only seed data.
+-- password_hash is plain text "1234" for now.
 -- TODO: replace with bcrypt-hashed passwords before production.
+
+USE side5_db;
+
+SET FOREIGN_KEY_CHECKS = 0;
+SET SQL_SAFE_UPDATES = 0;
+
+DELETE FROM session_mvp_votes;
+DELETE FROM player_stat_review_slots;
+DELETE FROM player_stat_reviews;
+DELETE FROM player_stat_submissions;
+DELETE FROM stat_submissions;
+DELETE FROM matches;
+DELETE FROM team_players;
+DELETE FROM teams;
+DELETE FROM session_players;
+DELETE FROM sessions;
+DELETE FROM league_members;
+DELETE FROM player_profiles;
+DELETE FROM leagues;
+DELETE FROM users;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+ALTER TABLE users AUTO_INCREMENT = 1;
+ALTER TABLE leagues AUTO_INCREMENT = 1;
+ALTER TABLE league_members AUTO_INCREMENT = 1;
+
 INSERT INTO users (username, password_hash, display_name, base_value, rating)
 VALUES
-  ('reydel', '1234', 'Reydel', 18.50, 8.9),
-  ('alexis', '1234', 'Alexis', 14.20, 8.2),
-  ('migue', '1234', 'Migue', 9.80, 7.6),
-  ('jorge', '1234', 'Jorge', 8.10, 7.8),
-  ('andres', '1234', 'Andres', 7.30, 7.4),
-  ('nico', '1234', 'Nico', 6.80, 7.2),
-  ('ivan', '1234', 'Ivan', 6.00, 7.0),
-  ('pablo', '1234', 'Pablo', 5.50, 6.8),
-  ('mario', '1234', 'Mario', 7.00, 7.1),
-  ('rafa', '1234', 'Rafa', 7.50, 7.5),
-  ('dani', '1234', 'Dani', 6.70, 7.0),
-  ('leo', '1234', 'Leo', 8.20, 7.9),
-  ('chris', '1234', 'Chris', 6.20, 6.9),
-  ('juan', '1234', 'Juan', 5.90, 7.1),
-  ('guti', '1234', 'Guti', 6.40, 7.0);
+  ('reydel_demo', '1234', 'Reydel Gutierrez', 10.00, 6.0),
+  ('alexis_demo', '1234', 'Alexis Rodriguez', 10.00, 6.0),
+  ('migue_demo', '1234', 'Miguel Perez', 10.00, 6.0),
+  ('jorge_demo', '1234', 'Jorge Hernandez', 10.00, 6.0);
+
+INSERT INTO player_profiles (user_id, main_archetype, total_worth, ovr, mvp_trophies, matches_played)
+SELECT id, 'None', 10.00, 60, 0, 0
+FROM users;
 
 INSERT INTO leagues (name, description, invite_code, owner_user_id)
 VALUES (
-  'Monday Ballers',
-  'Weekly Monday side5 league.',
-  'SIDE5-MON',
-  (SELECT id FROM users WHERE username = 'reydel')
+  'Demo League',
+  'Testing league for the Side5 demo environment.',
+  'SIDE5-DEMO',
+  (SELECT id FROM users WHERE username = 'reydel_demo')
 );
 
 INSERT INTO league_members (
@@ -40,10 +61,10 @@ INSERT INTO league_members (
   ovr,
   player_worth
 )
-VALUES (
-  (SELECT id FROM leagues WHERE invite_code = 'SIDE5-MON'),
-  (SELECT id FROM users WHERE username = 'reydel'),
-  'owner',
+SELECT
+  (SELECT id FROM leagues WHERE invite_code = 'SIDE5-DEMO'),
+  u.id,
+  CASE WHEN u.username = 'reydel_demo' THEN 'owner' ELSE 'player' END,
   TRUE,
   0,
   6.0,
@@ -53,33 +74,10 @@ VALUES (
   0,
   60,
   10.00
+FROM users u
+WHERE u.username IN (
+  'reydel_demo',
+  'alexis_demo',
+  'migue_demo',
+  'jorge_demo'
 );
-
-INSERT INTO sessions (
-  league_id,
-  title,
-  session_date,
-  session_time,
-  location,
-  format,
-  budget_per_team,
-  status,
-  created_by_user_id
-)
-VALUES (
-  (SELECT id FROM leagues WHERE invite_code = 'SIDE5-MON'),
-  'Monday Night',
-  DATE_ADD(CURDATE(), INTERVAL 7 DAY),
-  '20:00:00',
-  'North Indoor Arena',
-  '5v5',
-  50.00,
-  'open',
-  (SELECT id FROM users WHERE username = 'reydel')
-);
-
-INSERT INTO teams (session_id, name, captain_user_id)
-SELECT id, 'Side A', NULL FROM sessions WHERE title = 'Monday Night' LIMIT 1;
-
-INSERT INTO teams (session_id, name, captain_user_id)
-SELECT id, 'Side B', NULL FROM sessions WHERE title = 'Monday Night' LIMIT 1;

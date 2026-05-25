@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import PrimaryButton from '../components/PrimaryButton'
@@ -44,7 +44,6 @@ function Draft() {
   const [teamPlayerMap, setTeamPlayerMap] = useState({})
   const [benchShuffleAssignments, setBenchShuffleAssignments] = useState([])
   const [unassignedBenchCount, setUnassignedBenchCount] = useState(0)
-  const [minPlayersPerTeamToLock, setMinPlayersPerTeamToLock] = useState(5)
   const [busy, setBusy] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
   const [loading, setLoading] = useState(true)
@@ -55,31 +54,43 @@ function Draft() {
 
   const numericSessionId = Number.parseInt(String(sessionId), 10)
 
-  const loadDraft = async () => {
-    if (Number.isNaN(numericSessionId)) return
-    const draftRes = await apiFetch(`/api/sessions/${numericSessionId}/draft`, { cache: 'no-store' })
-    const payload = draftRes?.data || {}
-    setSession(payload.session || null)
-    setTeams(Array.isArray(payload.teams) ? payload.teams : [])
-    const rosterRows = Array.isArray(payload.roster) ? payload.roster : []
-    setRoster(rosterRows)
-    const rows = Array.isArray(payload.teamPlayers) ? payload.teamPlayers : []
-    const nextMap = {}
-    rows.forEach((row) => {
-      const teamKey = String(row.team_id)
-      if (!nextMap[teamKey]) nextMap[teamKey] = []
-      nextMap[teamKey].push(String(row.user_id))
-    })
-    setTeamPlayerMap(nextMap)
-    setBenchShuffleAssignments(Array.isArray(payload.benchShuffleAssignments) ? payload.benchShuffleAssignments : [])
-    setUnassignedBenchCount(Number(payload.unassignedBenchCount) || 0)
-    setMinPlayersPerTeamToLock(Number(payload.minPlayersPerTeamToLock) || 5)
-  }
+  const loadDraft = useCallback(
+    async ({ silent = false } = {}) => {
+      if (Number.isNaN(numericSessionId)) return
+      const draftRes = await apiFetch(`/api/sessions/${numericSessionId}/draft`, { cache: 'no-store' })
+      const payload = draftRes?.data || {}
+      if (!payload.session) {
+        throw new Error('Session not found.')
+      }
+      setSession(payload.session)
+      setTeams(Array.isArray(payload.teams) ? payload.teams : [])
+      const rosterRows = Array.isArray(payload.roster) ? payload.roster : []
+      setRoster(rosterRows)
+      const rows = Array.isArray(payload.teamPlayers) ? payload.teamPlayers : []
+      const nextMap = {}
+      rows.forEach((row) => {
+        const teamKey = String(row.team_id)
+        if (!nextMap[teamKey]) nextMap[teamKey] = []
+        nextMap[teamKey].push(String(row.user_id))
+      })
+      setTeamPlayerMap(nextMap)
+      setBenchShuffleAssignments(Array.isArray(payload.benchShuffleAssignments) ? payload.benchShuffleAssignments : [])
+      setUnassignedBenchCount(Number(payload.unassignedBenchCount) || 0)
+      if (!silent) setError('')
+    },
+    [numericSessionId],
+  )
 
   useEffect(() => {
     let mounted = true
     ;(async () => {
-      if (Number.isNaN(numericSessionId)) return
+      if (Number.isNaN(numericSessionId)) {
+        if (mounted) {
+          setLoading(false)
+          setError('Invalid session link.')
+        }
+        return
+      }
       setLoading(true)
       setError('')
       try {
@@ -94,15 +105,26 @@ function Draft() {
     return () => {
       mounted = false
     }
-  }, [numericSessionId])
+  }, [numericSessionId, loadDraft])
 
   useEffect(() => {
     if (Number.isNaN(numericSessionId)) return undefined
-    const timer = window.setInterval(() => {
-      loadDraft().catch(() => {})
-    }, 10000)
-    return () => window.clearInterval(timer)
-  }, [numericSessionId])
+    let intervalId
+    const tick = () => {
+      loadDraft({ silent: true }).catch(() => {})
+    }
+    const schedule = () => {
+      window.clearInterval(intervalId)
+      const ms = document.hidden ? 12000 : 2500
+      intervalId = window.setInterval(tick, ms)
+    }
+    schedule()
+    document.addEventListener('visibilitychange', schedule)
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', schedule)
+    }
+  }, [numericSessionId, loadDraft])
 
   useEffect(() => {
     if (!toastMessage) return undefined
@@ -226,18 +248,9 @@ function Draft() {
 
   const isCaptainOfTeam = (team) => String(team.captainUserId || '') === String(currentUserId || '')
 
-  /** Roster size for lock rules: distinct picks + captain if not already in team_players (matches server). */
-  const rosterCountForLockTeam = (team) => {
-    const cap = team.captainUserId ? String(team.captainUserId) : null
-    const uidSet = new Set((team.playerIds || []).map(String))
-    if (cap) uidSet.add(cap)
-    return uidSet.size
-  }
-
   const canLockTeam = (team) => {
     if (team.isLocked) return false
-    if (!isCaptainOfTeam(team)) return false
-    return rosterCountForLockTeam(team) >= minPlayersPerTeamToLock
+    return isCaptainOfTeam(team)
   }
 
   const showUnlockForTeam = (team) => team.isLocked && isCaptainOfTeam(team) && !benchShuffleDone
@@ -353,7 +366,7 @@ function Draft() {
     return list
   }, [availablePlayers, searchQuery, priceFilter])
 
-  if (!Number.isNaN(numericSessionId) && loading) {
+  if (loading && !session) {
     return (
       <div className="screen">
         <PageHeader title="Draft" />
@@ -363,7 +376,33 @@ function Draft() {
       </div>
     )
   }
-  if (!session) return <Navigate to="/sessions" replace />
+
+  if (!session) {
+    return (
+      <div className="screen draft-page">
+        <PageHeader title="Draft" />
+        <section className="card">
+          <p className="meta draft-page__error">{error || 'Could not load this draft.'}</p>
+          <SecondaryButton
+            type="button"
+            className="w-full"
+            onClick={() => {
+              setLoading(true)
+              setError('')
+              loadDraft()
+                .catch((err) => setError(err?.message || 'Failed to load draft.'))
+                .finally(() => setLoading(false))
+            }}
+          >
+            Try again
+          </SecondaryButton>
+          <Link to="/sessions" className="session-detail-cta-link" style={{ display: 'block', marginTop: '0.75rem' }}>
+            <SecondaryButton className="w-full">Back to sessions</SecondaryButton>
+          </Link>
+        </section>
+      </div>
+    )
+  }
 
   if (isPastSession(session)) {
     return <Navigate to={`/game-hub/${sessionId}`} replace />
@@ -432,9 +471,9 @@ function Draft() {
       <section className="card draft-lock-card">
         <p className="session-title">Lock teams</p>
         <p className="meta">
-          Only each team captain can lock or unlock their own roster. Locking needs at least {minPlayersPerTeamToLock}{' '}
-          players on that team (including the captain), from the session match format. When every team is locked,
-          remaining bench players are randomly assigned. Unlock is not available after that shuffle runs.
+          Only each team captain can lock or unlock their own roster. Lock whenever you are done picking — no minimum
+          squad size. When every team is locked, remaining bench players are randomly assigned. Unlock is not available
+          after that shuffle runs.
         </p>
         <p className="meta">
           Teams locked: {teamsDecorated.filter((t) => t.isLocked).length} / {teamsDecorated.length} · Bench still
@@ -468,12 +507,8 @@ function Draft() {
                         <SecondaryButton
                           type="button"
                           className="draft-board-team-head__lock-btn"
-                          disabled={busy || rosterCountForLockTeam(team) < minPlayersPerTeamToLock}
-                          title={
-                            rosterCountForLockTeam(team) < minPlayersPerTeamToLock
-                              ? `Need at least ${minPlayersPerTeamToLock} players on this team (including you) before locking.`
-                              : 'Lock your roster for this match.'
-                          }
+                          disabled={busy}
+                          title="Lock your roster when you are done picking."
                           onClick={() => handleLockTeam(team)}
                         >
                           Lock team
@@ -716,9 +751,9 @@ function Draft() {
         <div>
           <h2 className="draft-how-card__title">How it works</h2>
           <p className="draft-how-card__text">
-            Each team has a ${budgetLimitNum.toFixed(1)}M budget. Captains pick their squad, then lock when they have at
-            least {minPlayersPerTeamToLock} on the roster (format-based). When all teams are locked, any remaining bench
-            players are randomly assigned. Everyone can follow along live.
+            Each team has a ${budgetLimitNum.toFixed(1)}M budget. Captains pick their squad and lock when they are done.
+            When all teams are locked, any remaining bench players are randomly assigned. The board updates every few
+            seconds so everyone can follow along live.
           </p>
         </div>
       </section>

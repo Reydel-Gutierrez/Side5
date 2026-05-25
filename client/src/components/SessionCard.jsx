@@ -34,7 +34,7 @@ function SessionCard({ session, showLeague, variant = 'default' }) {
             <p className="home-dashboard-card__meta">
               <span className="home-session-card__meta-item">{session.date}</span>
               <span className="home-session-card__meta-sep" aria-hidden="true">
-                ·
+                ï¿½
               </span>
               <span className="home-session-card__meta-item">{session.time}</span>
             </p>
@@ -62,7 +62,7 @@ function SessionCard({ session, showLeague, variant = 'default' }) {
         <p className="meta league-inline">League: {session.leagueName}</p>
       ) : null}
       <p className="meta">
-        {session.date} · {session.time}
+        {session.date} ï¿½ {session.time}
       </p>
       {session.league_id ? <p className="meta">League ID: {session.league_id}</p> : null}
       <p className="meta">

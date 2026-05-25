@@ -5,6 +5,7 @@ import SecondaryButton from '../components/SecondaryButton'
 import { useMockApp } from '../context/MockAppContext'
 import { useDbPlayerSummary } from '../hooks/useDbPlayerSummary'
 import { safeNumber } from '../utils/safeNumber'
+import { radarDataFromSummary } from '../constants/playStyles'
 
 function LeagueShieldIcon() {
   return (
@@ -94,9 +95,12 @@ function Profile() {
 
   const myRoleInActive = activeLeague ? getLeagueMemberRole(activeLeague.id, currentUser.id) : null
   const identity = getPlayerIdentity(me.id, activeLeague?.id ?? null)
-  const radarData = getPlayerAttributeProfile(me.id, activeLeague?.id ?? null)
+  const radarData = dbSummary
+    ? radarDataFromSummary(dbSummary)
+    : getPlayerAttributeProfile(me.id, activeLeague?.id ?? null)
   const heroOverall = safeNumber(dbSummary?.ovr ?? me.overall, me.overall)
   const heroArchetype = dbSummary?.main_archetype || (identity.hasVotes ? identity.mainArchetype : 'None')
+  const heroArchetypeDescription = dbSummary?.archetype_description || null
   const heroWorth = safeNumber(dbSummary?.player_worth ?? dbSummary?.total_worth ?? me.value, 10)
   const heroMvps = safeNumber(dbSummary?.mvp_trophies ?? me.mvps, 0)
   const heroMatches = safeNumber(dbSummary?.matches_played ?? me.games, 0)
@@ -241,6 +245,7 @@ function Profile() {
           overall: heroOverall,
           totalWorth: heroWorth.toFixed(1),
           archetype: heroArchetype,
+          archetypeDescription: heroArchetypeDescription,
           mvpTrophies: heroMvps,
           matchesPlayed: heroMatches,
           avatarImage: currentUser.avatarImage ?? '',

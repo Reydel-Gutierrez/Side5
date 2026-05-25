@@ -44,6 +44,20 @@ CREATE TABLE IF NOT EXISTS league_members (
   mvp_count INT NOT NULL DEFAULT 0,
   ovr SMALLINT NOT NULL DEFAULT 60,
   player_worth DECIMAL(6,2) NOT NULL DEFAULT 10.00,
+  style_positioning INT NOT NULL DEFAULT 0,
+  style_fast INT NOT NULL DEFAULT 0,
+  style_intelligent INT NOT NULL DEFAULT 0,
+  style_sniper INT NOT NULL DEFAULT 0,
+  style_strong INT NOT NULL DEFAULT 0,
+  style_skilled INT NOT NULL DEFAULT 0,
+  style_creative INT NOT NULL DEFAULT 0,
+  style_defensive INT NOT NULL DEFAULT 0,
+  style_clutch INT NOT NULL DEFAULT 0,
+  style_leader INT NOT NULL DEFAULT 0,
+  style_aggressive INT NOT NULL DEFAULT 0,
+  style_stamina INT NOT NULL DEFAULT 0,
+  style_passer INT NOT NULL DEFAULT 0,
+  style_dribbler INT NOT NULL DEFAULT 0,
   joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE (league_id, user_id),
@@ -135,6 +149,23 @@ CREATE TABLE IF NOT EXISTS player_stat_submissions (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
   FOREIGN KEY (league_id) REFERENCES leagues(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS player_style_votes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  league_id INT NOT NULL,
+  session_id INT NOT NULL,
+  reviewed_user_id INT NOT NULL,
+  reviewer_user_id INT NOT NULL,
+  submission_id INT NULL,
+  style_key VARCHAR(32) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_style_vote_session (session_id, reviewer_user_id, reviewed_user_id, style_key),
+  FOREIGN KEY (league_id) REFERENCES leagues(id) ON DELETE CASCADE,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (reviewed_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (reviewer_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (submission_id) REFERENCES player_stat_submissions(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS player_stat_reviews (
